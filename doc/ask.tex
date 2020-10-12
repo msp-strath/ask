@@ -1,0 +1,85 @@
+\documentclass{article}
+\usepackage{a4}
+
+\newcommand{\ask}{\texttt{ask}}
+\newcommand{\prop}{\texttt{prop}}
+\newcommand{\Prop}{\texttt{Prop}}
+\newcommand{\where}{\texttt{where}}
+\newcommand{\by}{\leftarrow}
+
+\begin{document}
+\title{\ask}
+\author{probably some other people and Conor McBride}
+\maketitle
+
+
+\section{Introduction}
+
+The \ask{} system is a programming language and proof assistant (not) implemented (yet) as an idempotent textfile transducer. You feed your pathetic blethering through \ask{} and it will
+build parts of your development which are obviously missing and comment out and upon parts of
+your development which are obviously bogus. It must be idempotent in that if you feed it its
+own output, there should be nothing new to add or take away.
+
+The \ask{} programming language is a total fragment of Haskell with strictly positive
+unindexed inductive datatypes, higher order function types, and higher rank type schemes.
+The \ask{} proof language is some form of predicate logic with configurable rules.
+
+
+\section{Propositions}
+
+The keyword \prop{} introduces the declaration of a new proposition former. $\Prop$ is the
+type of propositions.
+
+We define a relation as follows
+\[
+  \begin{array}{l}
+    \prop \; R\; \tau\;\ldots\;\where\\
+    \;\;\mathit{intro} \\
+    \;\;\vdots\\
+  \end{array}
+\]
+with each $\mathit{intro}_i$ given as
+\[
+  \begin{array}{l}
+    R\;p\;\ldots\;\by\;I\;p'\;\ldots\;\where\\
+    \;\;\mathit{condition} \\
+    \;\;\vdots\\
+  \end{array}
+\]
+There is no need to name an introduction rule if its conclusion
+anti-unifies with the conclusion of all other introduction rules.
+
+Relation symbols may be Constructor symbols or any infix symbol (like
+types when TypeOperators is enabled.)
+Intro rules must be Constructor symbols or :infix.
+
+For examples,
+\[
+  \begin{array}[t]{l}
+    \prop\;\Prop\;\texttt{\&\&}\;\Prop\;\where \\
+    \;\;a\, \texttt{\&\&}\,b\;\where \\
+    \;\;\;\;a\\
+    \;\;\;\;b
+  \end{array}
+  \qquad
+  \begin{array}[t]{l}
+    \prop\;\Prop\;\texttt{||}\;\Prop\;\where \\
+    \;\;a\, \texttt{||}\,b \;\by\;\texttt{Left}\;\where \\
+    \;\;\;\;a\\
+    \;\;a\, \texttt{||}\,b \;\by\;\texttt{Right}\;\where \\
+    \;\;\;\;b\\
+  \end{array}
+\]
+
+Of course, conditions may themselves have hypotheses.
+\[\begin{array}{l}
+  \prop\;\Prop\;\rightarrow\;\Prop\; \where \\
+  \;\; a\,\rightarrow\,b\; \where\\
+  \;\;\;\;b\; \where\\
+    \;\;\;\;\;\;a
+    \end{array}
+\]
+
+
+
+\end{document}
