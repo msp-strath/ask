@@ -122,7 +122,7 @@ phase0 p@(y, x) (c : cs) = case c of
   _ | c `elem` specials -> (Sym, p, [c]) : phase0 (y, x + 1) cs
     | c `elem` symbols -> more0 Sym p (B0 :< c) (y, x + 1) (`elem` symbols) cs
     | c `elem` newlines -> (Ret, p, [c]) : phase0 (y + 1, 1) cs
-    | isDigit c -> more0 Num p (B0 :< c) (y, x + 1) (`elem` symbols) cs
+    | isDigit c -> more0 Num p (B0 :< c) (y, x + 1) isDigit cs
     | isLower c -> more0 Lid p (B0 :< c) (y, x + 1) isIdTaily cs
     | isUpper c -> more0 Uid p (B0 :< c) (y, x + 1) isIdTaily cs
 

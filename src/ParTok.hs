@@ -46,8 +46,8 @@ eat f = ParTok $ \case
 the :: Tok Lay -> String -> ParTok ()
 the t s = eat $ \ (u, _, r) -> guard $ u == t && r == s
 
-kinda :: Tok Lay -> ParTok String
-kinda t = eat $ \ (u, _, r) -> do guard $ u == t ; return r
+kinda :: Tok Lay -> ParTok LexL
+kinda t = eat $ \ l@(u, _, _) -> do guard $ u == t ; return l
 
 brk :: Char -> ParTok x -> ParTok x
 brk c p = ParTok $ \case
