@@ -27,7 +27,10 @@ data Tok f
   | Ret
   | Cmm
   | Bad
-  | T (f (Tok f, Pos, String))
+  | T (f (Lex f))
+
+type Pos = (Int, Int) -- row and column; origin is 1
+type Lex f = (Tok f, Pos, String)
 
 class PShow f where
   pshow :: Show x => f x -> String
@@ -71,6 +74,7 @@ instance PShow K0 where pshow = show
 instance PEq K0 where peq = (==)
 
 type Tok0 = Tok K0
+type Lex0 = Lex K0
 
 tok0 :: Tok0 -> Tok f
 tok0 Lid = Lid
@@ -88,10 +92,6 @@ tok0 Bad = Bad
 
 lex0 :: Lex0 -> (Tok f, Pos, String)
 lex0 (t, p, s) = (tok0 t, p, s)
-
-type Pos = (Int, Int) -- row and column; origin is 1
-
-type Lex0 = (Tok0, Pos, String)
 
 lexPhase0 :: String -> [Lex0]
 lexPhase0 = phase0 (1, 1) . untab 1
@@ -181,22 +181,21 @@ keywords =
 isIdTaily :: Char -> Bool
 isIdTaily c = isAlphaNum c || c `elem` "'_"
 
-data Bracket = Rnd | Sqr deriving (Show, Eq)
-
 data Lay l
   = (Pos, String, [l]) :-! Maybe (l, Lines l, l)
-  | LB Bracket l [l] l
-  deriving (Functor, Show)
+  | LB l [l] l
+  deriving (Functor, Show, Eq)
 
+instance PEq Lay where peq = (==)
 instance PShow Lay where pshow = show
 
-data Lines l = [l] :-& More l deriving (Functor, Show)
-data More l = Stop | l :-/ Lines l deriving (Functor, Show)
+data Lines l = [l] :-& More l deriving (Functor, Show, Eq)
+data More l = Stop | l :-/ Lines l deriving (Functor, Show, Eq)
 infixr 5 :-&
 infixr 5 :-/
 
 type TokL = Tok Lay
-type LexL = (Tok Lay, Pos, String)
+type LexL = Lex Lay
 
 type Layer = (Int, Bwd [LexL], Bwd LexL)
 
@@ -206,7 +205,7 @@ heralds = ["where", "do", "of", "let"]
 layEnders :: [(String, String)]
 layEnders = [("do", "where"), ("of","where"), ("let", "in")]
 
-gappy :: Lex0 -> Bool
+gappy :: Lex f -> Bool
 gappy (t, _, _) = case t of
   Spc -> True
   Ret -> True
@@ -223,6 +222,15 @@ munch b (k, i) ls = case span gappy ls of
   (ss, l@(t, p@(y, x), s) : ls)
     | t == Sym && s == ";" || x <= i && b
     -> ([], map lex0 ss, l : ls)
+    | t == Sym && s == "}" && i == 0
+    -> ([], map lex0 ss, l : ls)
+    | t == Sym && s == "{"
+    -> let (bl, c, us) = laylines ("", 0) ls
+           (ts, ss', vs) = munch True (k, i) us
+       in ( map lex0 ss ++
+            (T ((p, "", []) :-! Just (lex0 l, bl, c)), p, "") : ts
+          , ss'
+          , vs)
     | t == Key && (k, s) `elem` layEnders
     -> ([], map lex0 ss, l : ls)
     | t == Key && s `elem` heralds
@@ -241,7 +249,7 @@ munches (k, i) ls = case span gappy ls of
        (map lex0 ss, Just (lex0 l, xs, c), us)
     | x > i
     -> let (xs, c, us) = laylines (k, x) (l : ls) in
-       (map lex0 ss, Just ((Sym, p, ""), xs, c), us)
+       (map lex0 ss, Just ((Spc, p, ""), xs, c), us)
   (ss, ls) -> (map lex0 ss, Nothing, ls)
 
 laylines :: (String, Int) -> [Lex0] -> (Lines LexL, LexL, [Lex0])
@@ -249,14 +257,30 @@ laylines (k, i) ls = case munch False (k, i) ls of
   (ts, ss, l@(t, p@(y, x), s) : ls)
     | t == Sym && s == ";" && x >= i
     -> let (xs, c, us) = laylines (k, i) ls in
-       ((ts ++ ss) :-& lex0 l :-/ xs, c, us)
+       ((brackety B0 B0 ts ++ ss) :-& lex0 l :-/ xs, c, us)
     | x == i
     -> let (xs, c, us) = laylines (k, i) (l : ls) in
-       ((ts ++ ss) :-& (Sym, p, "") :-/ xs, c, us)
+       ((brackety B0 B0 ts ++ ss) :-& (Spc, p, "") :-/ xs, c, us)
     | t == Sym && s == "}" && i == 0
-    -> ((ts ++ ss) :-& Stop, lex0 l, ls)
+    -> ((brackety B0 B0 ts ++ ss) :-& Stop, lex0 l, ls)
   (ts, ss, ls)
-    -> ((ts ++ ss) :-& Stop, (Sym, pfirst ls, ""), ls)
+    -> ((brackety B0 B0 ts ++ ss) :-& Stop, (Spc, pfirst ls, ""), ls)
+
+brackety :: Bwd (Bwd LexL, LexL) -> Bwd LexL -> [LexL] -> [LexL]
+brackety bz lz [] = dump bz (lz <>> []) where
+  dump B0 ls = ls
+  dump (bz :< (kz, k)) ls = dump bz (kz <>> (k : ls))
+brackety bz lz (l@(Sym, _, [o]) : ls) | o `elem` "([{" =
+  brackety (bz :< (lz, l)) B0 ls
+brackety bz lz (l@(Sym, _, [c]) : ls) | c `elem` ")]}" =
+  blat bz lz where
+  blat B0 lz = brackety B0 (lz :< l) ls
+  blat (bz :< (kz, k@(_, p, [o]))) lz
+    | abs (ord c - ord o) < 3 -- matches the open
+    = brackety bz (kz :< (T (LB k (lz <>> []) l), p, "")) ls
+    | otherwise -- bad
+    = blat bz ((kz :< k) <> lz)
+brackety bz lz (l : ls) = brackety bz (lz :< l) ls
 
 lines2List :: Lines LexL -> [[LexL]]
 lines2List (l :-& m) = l : case m of
