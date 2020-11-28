@@ -1,19 +1,24 @@
+module Basics where
+
+prop False
+
+prop True where
+  prove True by Trivial
+
 prop Prop & Prop where
   prove a & b by AndI where
-    a
-    b
+    prove a
+    prove b
+infixr 7 &
 
 prop Prop | Prop where
   prove a | b by OrIL where
-    a
+    prove a
   prove a | b by OrIR where
-    b
+    prove b
+infixr 6 |
 
 prop Prop -> Prop where
   prove a -> b by ImpI where
     given a prove b
-
-prove a & b -> b & a by ImpI where
-  given a & b prove b & a from a & b where
-    given a, b prove b & a by AndI
-
+infixr 1 ->

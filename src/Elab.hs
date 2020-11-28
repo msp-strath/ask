@@ -12,6 +12,7 @@ import ParTok
 
 data Decl
   = DeclInfix
+      Assocy     -- associativity
       Int        -- fixity level
       [String]   -- operators
   | DeclProp

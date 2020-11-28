@@ -31,6 +31,8 @@ data Tok f
 
 type Pos = (Int, Int) -- row and column; origin is 1
 type Lex f = (Tok f, Pos, String)
+txt :: Lex f -> String
+txt (_, _, s) = s
 
 class PShow f where
   pshow :: Show x => f x -> String
@@ -175,7 +177,7 @@ keywords :: [String]
 keywords =
   [ "case", "class", "instance", "data", "do", "if", "then", "else", "where", "let", "in", "of"
   , "module", "import", "deriving", "infix", "infixl", "infixr"
-  , "prop", "prove", "by", "from", "contrarily"
+  , "prop", "prove", "by", "from", "contrarily", "given"
   ]
 
 isIdTaily :: Char -> Bool

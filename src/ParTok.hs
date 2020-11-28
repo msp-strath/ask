@@ -38,6 +38,11 @@ instance Alternative ParTok where
   empty = mempty
   (<|>) = (<>)
 
+(?>) :: ParTok x -> ParTok x -> ParTok x
+(?>) (ParTok f) (ParTok g) = ParTok $ \ ls -> case f ls of
+  [] -> g ls
+  xs -> xs
+
 eat :: (LexL -> Maybe x) -> ParTok x
 eat f = ParTok $ \case
   l : ls | Just x <- f l -> return ([l], x, ls)
@@ -61,6 +66,10 @@ spc = ParTok $ \ ls -> let (ks, ms) = span gappy ls in [(ks, (), ms)]
 spd :: ParTok x -> ParTok x
 spd p = id <$ spc <*> p <* spc
 
+sep :: ParTok x -> ParTok () -> ParTok [x]
+sep p s = (:) <$> spd p <*> many (id <$ s <*> spd p)
+      <|> [] <$ spc
+
 eol :: ParTok ()
 eol = ParTok $ \case
   [] -> [([], (), [])]
@@ -69,7 +78,7 @@ eol = ParTok $ \case
 lol :: String -> ParTok x -> ParTok [x]
 lol k p = ParTok $ \case
   l@(T ((_, h, _) :-! m) , _, _) : ls | h == k -> case m of
-    Nothing -> [([], [], [])]
+    Nothing -> [([l], [], ls)]
     Just (_, pl, _) -> grok pl >>= \ x -> [([l], x, ls)]
   _ -> []
   where
