@@ -14,25 +14,33 @@ data RawDecl
   | RawSewage
   | RawFixity FixityTable
   | RawProp Appl [RawIntro]
+  | RawProof RawProve
   deriving Show
 
+raw :: String -> [(RawDecl, [LexL])]
+raw input = map (grok ft) ls where
+  ls = lexAll input
+  ft = getFixities ls
+  grok ft l = case parTok (pDecl ft) l of
+    [(_, x, [])] -> (x, l)
+    _ -> (RawSewage, l)
+
 pDecl :: FixityTable -> ParTok RawDecl
-pDecl ft = (good <* eol) ?> (bad <* eol) where
+pDecl ft = good <* eol where
   good = RawHeeHaw <$ spc
      <|> RawModule <$ the Key "module" <*> spd (txt <$> kinda Uid)
            <* lol "where" (pure ())
      <|> RawFixity <$> (fixity >>= agree)
-     <|> prop
-  bad = RawSewage <$ many (eat Just)
+     <|> uncurry RawProp <$ the Key "prop" <*> prop
+     <|> RawProof <$> (pProve ft)
   agree at = at <$ guard (all id $ M.intersectionWith (==) at ft)
   prop = do
-    the Key "prop"
-    r@(h :$ _) <- spd (pAppl ft)
+    r@(h :$$ _) <- spd (pAppl ft)
     is <- lol "where" (pIntro h) <|> [] <$ spc
-    return $ RawProp r is
+    return (r, is)
   pIntro h = do
     the Key "prove"
-    g :$ xs <- spd (pAppl ft)
+    g :$$ xs <- spd (pAppl ft)
     guard (txt h == txt g)
     the Key "by"
     r <- spd (pAppl ft)
@@ -46,10 +54,43 @@ pDecl ft = (good <* eol) ?> (bad <* eol) where
 
 data RawIntro
   = RawIntro
-    { introPats :: [Appl]
-    , rulePat   :: Appl
-    , rulePrems :: [([Appl], Appl)]
-    } deriving Show
+  { introPats :: [Appl]
+  , rulePat   :: Appl
+  , rulePrems :: [([Appl], Appl)]
+  } deriving Show
+
+data RawProve
+  = RawProve
+  { goal      :: Appl
+  , method    :: RawMethod
+  , subproofs :: [([RawGiven], RawProve)]
+  } deriving Show
+
+pProve :: FixityTable -> ParTok RawProve
+pProve ft = RawProve <$ the Key "prove"
+  <*> spd (pAppl ft)
+  <*> spd pMethod
+  <*> pSubs
+  where
+  pMethod
+    =   Stub <$ the Sym "?" <* spc
+    <|> By   <$ the Key "by"   <*> spd (pAppl ft)
+    <|> From <$ the Key "from" <*> spd (pAppl ft)
+  pSubs = lol "where" pSub <|> [] <$ spc
+  pSub = (,) <$> pGivens <*> pProve ft
+  pGivens
+    =   id <$ the Key "given" <*> sep (Given <$> pAppl ft) (the Sym ",")
+    <|> pure []
+
+data RawMethod
+  = Stub
+  | By Appl
+  | From Appl
+  deriving Show
+
+data RawGiven
+  = Given Appl
+  deriving Show
 
 data Assocy = LAsso | NAsso | RAsso deriving (Show, Eq)
 type FixityTable = M.Map String (Int, Assocy)
@@ -85,11 +126,12 @@ fixity = actual ?> pure M.empty where
   mkTable :: Assocy -> Int -> [String] -> FixityTable
   mkTable a i xs = M.fromList [(x, (i, a)) | x <- xs]
 
-data Appl = LexL :$ [([LexL], Appl)] deriving Show
+data Appl = LexL :$$ [([LexL], Appl)] deriving Show
 
 ($$) :: Appl -> [([LexL], Appl)] -> Appl
-(h :$ as) $$ bs = h :$ (as ++ bs)
+(h :$$ as) $$ bs = h :$$ (as ++ bs)
 
+-- FIXME: support tuples but not by treating comma as infix
 pAppl :: FixityTable -> ParTok Appl
 pAppl ftab = go where
   go :: ParTok Appl
@@ -101,13 +143,13 @@ pAppl ftab = go where
   start :: (Int, Assocy) -> ParTok Appl
   start f = (spd . ext $ (($$) <$> wee <*> many (spd . ext $ wee))) >>= more f (maxBound, NAsso)
   wee :: ParTok Appl
-  wee = (:$ []) <$>
+  wee = (:$$ []) <$>
      (kinda Uid <|> kinda Lid <|>
       kinda Num <|> kinda Str <|> kinda Chr <|>
       brk '(' (spd iop))
     <|> brk '(' go
   iop :: ParTok LexL
-  iop = (kinda Sym >>= \ l@(_, _, s) -> guard (s /= "`") >> return l)
+  iop = (kinda Sym >>= \ l@(_, _, s) -> guard (not $ elem s ["`", ","]) >> return l)
     <|> id <$ the Sym "`" <*> (kinda Uid <|> kinda Lid) <* the Sym "`"
   more :: (Int, Assocy) -- working to the right of this
        -> (Int, Assocy) -- we've got this
@@ -122,5 +164,5 @@ pAppl ftab = go where
       guard (k < j || k == j && b == LAsso && c == LAsso)
       spc
       f <- ext $ start (k, c)
-      return ((k, c), o :$ [(ls, e), f])
+      return ((k, c), o :$$ [(ls, e), f])
     more (i, a) kc (ls ++ rs, e)

@@ -1,0 +1,40 @@
+module Nat where
+
+data Nat
+  = Z
+  | S Nat
+
+-- much bikeshedding ahoy
+(+) :: Nat -> Nat -> Nat
+compute x + y reducing x where
+  compute x + y from x where
+    compute Z + y = y
+    given x' :: Nat, forall y'. x' + y'
+      compute S x' + y = S (x' + y)
+
+fib :: Nat -> Nat
+compute fib x reducing x where
+  compute fib x from x where
+    compute fib Z = Z
+    compute fib (S x) from x where
+      compute fib (S Z) = S Z
+      compute fib (S y@(S x)) = fib y + fib x
+
+prop Nat <= Nat where
+  prove Z <= m by LeZ
+  prove S n <= S m by LeSS where
+    prove n <= m
+
+prove p <= n -> n <= m -> p <= m by ImpI where
+  given p <= n prove n <= m -> p <= m reducing p <= n where
+    prove n <= m -> p <= m by ImpI where
+      given n <= m prove p <= m from p <= n where
+        prove Z <= n by LeZ
+        given p' :: Nat, n' :: Nat
+          , p' <= n'
+          , S n' <= m
+          , {IH m'} n' <= m' -> p' <= m'
+          prove S p' <= m from S n' <= m where
+            given m' :: Nat, n' <= m' prove S p' <= S m' by LeSS where
+              prove p' <= m' from IH m'
+              
