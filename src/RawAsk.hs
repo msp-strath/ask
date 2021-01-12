@@ -1,3 +1,7 @@
+{-# LANGUAGE
+    DeriveFunctor
+#-}
+
 module RawAsk where
 
 import Bwd
@@ -14,11 +18,11 @@ data RawDecl
   | RawSewage
   | RawFixity FixityTable
   | RawProp Appl [RawIntro]
-  | RawProof RawProve
+  | RawProof (Prove () Appl)
   deriving Show
 
-raw :: String -> [(RawDecl, [LexL])]
-raw input = map (grok ft) ls where
+raw :: FixityTable -> String -> [(RawDecl, [LexL])]
+raw fi input = map (grok (fi <> ft)) ls where
   ls = lexAll input
   ft = getFixities ls
   grok ft l = case parTok (pDecl ft) l of
@@ -59,17 +63,19 @@ data RawIntro
   , rulePrems :: [([Appl], Appl)]
   } deriving Show
 
-data RawProve
-  = RawProve
-  { goal      :: Appl
-  , method    :: RawMethod
-  , subproofs :: [([RawGiven], RawProve)]
-  } deriving Show
+data Prove a t
+  = Prove
+  { goal       :: t
+  , method     :: Method t
+  , annotation :: a
+  , subproofs  :: [([Given t], Prove a t)]
+  } deriving (Show, Functor)
 
-pProve :: FixityTable -> ParTok RawProve
-pProve ft = RawProve <$ the Key "prove"
+pProve :: FixityTable -> ParTok (Prove () Appl)
+pProve ft = Prove <$ the Key "prove"
   <*> spd (pAppl ft)
   <*> spd pMethod
+  <*> pure ()
   <*> pSubs
   where
   pMethod
@@ -82,15 +88,15 @@ pProve ft = RawProve <$ the Key "prove"
     =   id <$ the Key "given" <*> sep (Given <$> pAppl ft) (the Sym ",")
     <|> pure []
 
-data RawMethod
+data Method t
   = Stub
-  | By Appl
-  | From Appl
-  deriving Show
+  | By t
+  | From t
+  deriving (Show, Functor)
 
-data RawGiven
-  = Given Appl
-  deriving Show
+data Given t
+  = Given t
+  deriving (Show, Functor)
 
 data Assocy = LAsso | NAsso | RAsso deriving (Show, Eq)
 type FixityTable = M.Map String (Int, Assocy)

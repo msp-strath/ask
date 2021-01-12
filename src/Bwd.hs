@@ -2,7 +2,7 @@
 
 module Bwd where
 
-data Bwd x = B0 | Bwd x :< x deriving (Functor, Foldable, Traversable)
+data Bwd x = B0 | Bwd x :< x deriving (Show, Eq, Ord, Functor, Foldable, Traversable)
 
 (<>>) :: Bwd x -> [x] -> [x]
 B0 <>> ys = ys

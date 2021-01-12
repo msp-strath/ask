@@ -1,6 +1,6 @@
 {-# LANGUAGE PatternSynonyms #-}
 
-module Elab where
+module Elab where  -- mothballed for now
 
 import HalfZip
 import Bwd
