@@ -330,7 +330,7 @@ whereKind p (Just (o, ls, c)) = case o of
     []
   naps p xs = (reverse zs, reverse ys) where (ys, zs) = span p (reverse xs)
   dental (l :-& m) = case span gappy l of
-    (_, (_, (_, d), _) : _) -> d
+    (_, (_, (_, d), _) : _) -> d - 1
     _ -> case m of
       Stop -> p + 2
       _ :-/ ls -> dental ls
