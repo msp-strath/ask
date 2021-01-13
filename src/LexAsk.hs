@@ -120,7 +120,7 @@ phase0 p@(y, x) ('_' : c : cs) | isIdTaily c
   = more0 Lid p (B0 :< '_' :< c)(y, x + 2) isIdTaily cs
 phase0 p@(y, x) ('_' : cs) = (Und, p, "_") : phase0 (y, x + 1) cs
 phase0 p@(y, x) (c : cs) = case c of
-  ' ' -> space0 p p 1 cs
+  ' ' -> space0 p p 0 (c : cs)
   _ | c `elem` specials -> (Sym, p, [c]) : phase0 (y, x + 1) cs
     | c `elem` symbols -> more0 Sym p (B0 :< c) (y, x + 1) (`elem` symbols) cs
     | c `elem` newlines -> (Ret, p, [c]) : phase0 (y + 1, 1) cs
@@ -305,3 +305,32 @@ lout (T ((_, x, lp) :-! m), _ , _) = (x ++) . rfold lout lp . case m of
     lm :-/ lls -> lout lm . go lls
 lout (T (LB lo ls lc), _, _) = lout lo . rfold lout ls . lout lc
 lout (_, _, s) = (s ++)
+
+data WhereKind
+  = Dental Int
+  | Bracy [LexL] [LexL] [LexL]
+  deriving Show
+
+whereKind :: Int -> Maybe (LexL, Lines LexL, LexL) -> WhereKind
+whereKind p Nothing = Dental (p + 2)
+whereKind p (Just (o, ls, c)) = case o of
+  (Sym, _, o) -> bracy ls
+  _ -> Dental (dental ls)
+ where
+  bracy (l :-& m) = case span gappy l of
+    (pre, mo) -> chasy pre (mo :-& m)
+  chasy pre (ls :-& s :-/ ms :-& Stop) = Bracy pre (se ++ s : mi) post where
+    (_, se) = naps gappy ls
+    (mi, _) = span gappy ms
+    (_, post) = naps gappy ms
+  chasy pre (_ :-& _ :-/ r) = chasy pre r
+  chasy pre (_ :-& Stop) = Bracy
+    pre
+    [(Sym,(0,0),";"), (Ret,(0,0),"\n"), (Spc,(0,0),replicate (p + 2) ' ')]
+    []
+  naps p xs = (reverse zs, reverse ys) where (ys, zs) = span p (reverse xs)
+  dental (l :-& m) = case span gappy l of
+    (_, (_, (_, d), _) : _) -> d
+    _ -> case m of
+      Stop -> p + 2
+      _ :-/ ls -> dental ls

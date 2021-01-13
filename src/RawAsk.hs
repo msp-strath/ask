@@ -68,14 +68,14 @@ data Prove a t
   { goal       :: t
   , method     :: Method t
   , annotation :: a
-  , subproofs  :: [([LexL], SubProve a t)]
+  , subproofs  :: [SubProve a t]
   , source     :: ([LexL], [LexL])
   } deriving (Show, Functor)
 
 data SubProve a t
-  = [Given t] ::- Prove a t
-  | SubPGap
-  | SubPGuff
+  = ([LexL], [Given t]) ::- Prove a t
+  | SubPGap [LexL]
+  | SubPGuff [LexL]
   deriving (Show, Functor)
 
 pProve :: FixityTable -> ParTok (Prove () Appl)
@@ -95,9 +95,9 @@ pProve ft = do
     =   Stub <$ the Sym "?" <* spc
     <|> By   <$ the Key "by"   <*> spd (pAppl ft)
     <|> From <$ the Key "from" <*> spd (pAppl ft)
-  pSubs = lolSpc "where" (ext pSub) <|> [] <$ spc
-  pSub = ((::-) <$> pGivens <*> pProve ft <|> SubPGap <$ spc <* eol) ?>
-    (SubPGuff <$ many (eat Just))
+  pSubs = lolSpc "where" pSub <|> [] <$ spc
+  pSub = ((::-) <$> ext pGivens <*> pProve ft <|> (SubPGap . fst) <$> ext (spc <* eol)) ?>
+    ((SubPGuff . fst) <$> ext (many (eat Just)))
   pGivens
     =   id <$ the Key "given" <*> sep (Given <$> pAppl ft) (the Sym ",")
     <|> pure []
