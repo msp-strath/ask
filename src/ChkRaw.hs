@@ -268,7 +268,7 @@ mayl :: Maybe x -> [x]
 mayl = foldMap return
 
 pout :: Maybe WhereKind -> Context -> Prove Status TmR -> String
-pout mk ga p@(Prove g m s ps (h, b)) = track (show mk) $ case s of
+pout mk ga p@(Prove g m s ps (h, b)) = case s of
   Keep -> rfold lout h "" ++ psout b ps
   Junk e -> fmat (case mk of { Nothing -> Dental 0; Just k -> k })
     [ "{- " ++ show e
