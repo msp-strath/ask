@@ -39,12 +39,12 @@ pDecl ft = good <* eol where
      <|> RawProof <$> (pProve ft)
   agree at = at <$ guard (all id $ M.intersectionWith (==) at ft)
   prop = do
-    r@(h :$$ _) <- spd (pAppl ft)
+    r@(_, h :$$ _) <- spd (pAppl ft)
     is <- lol "where" (pIntro h) <|> [] <$ spc
     return (r, is)
   pIntro h = do
     the Key "prove"
-    g :$$ xs <- spd (pAppl ft)
+    (_, g :$$ xs) <- spd (pAppl ft)
     guard (txt h == txt g)
     the Key "by"
     r <- spd (pAppl ft)
@@ -54,7 +54,7 @@ pDecl ft = good <* eol where
                    the Key "prove" <*> spd (pAppl ft)))
           <|> [] <$ spc
     return $ RawIntro
-      { introPats = map snd xs, rulePat = r, rulePrems = ps }
+      { introPats = xs, rulePat = r, rulePrems = ps }
 
 data RawIntro
   = RawIntro
@@ -146,23 +146,26 @@ fixity = actual ?> pure M.empty where
   mkTable :: Assocy -> Int -> [String] -> FixityTable
   mkTable a i xs = M.fromList [(x, (i, a)) | x <- xs]
 
-data Appl = LexL :$$ [([LexL], Appl)] deriving Show
+type Appl = ([LexL], Appl')
+data Appl' = LexL :$$ [Appl] deriving Show
 
-($$) :: Appl -> [([LexL], Appl)] -> Appl
+($$) :: Appl' -> [Appl] -> Appl'
 (h :$$ as) $$ bs = h :$$ (as ++ bs)
 
 -- FIXME: support tuples but not by treating comma as infix
 pAppl :: FixityTable -> ParTok Appl
-pAppl ftab = go where
-  go :: ParTok Appl
+pAppl = ext . pAppl'
+pAppl' :: FixityTable -> ParTok Appl'
+pAppl' ftab = go where
+  go :: ParTok Appl'
   go = start (-1, NAsso)
   fixity :: LexL -> (Int, Assocy)
   fixity (_, _, s) = case M.lookup s ftab of
     Nothing -> (9, LAsso)
     Just f  -> f
-  start :: (Int, Assocy) -> ParTok Appl
+  start :: (Int, Assocy) -> ParTok Appl'
   start f = (spd . ext $ (($$) <$> wee <*> many (spd . ext $ wee))) >>= more f (maxBound, NAsso)
-  wee :: ParTok Appl
+  wee :: ParTok Appl'
   wee = (:$$ []) <$>
      (kinda Uid <|> kinda Lid <|>
       kinda Num <|> kinda Str <|> kinda Chr <|>
@@ -173,8 +176,8 @@ pAppl ftab = go where
     <|> id <$ the Sym "`" <*> (kinda Uid <|> kinda Lid) <* the Sym "`"
   more :: (Int, Assocy) -- working to the right of this
        -> (Int, Assocy) -- we've got this
-       -> ([LexL], Appl)
-       -> ParTok Appl
+       -> Appl
+       -> ParTok Appl'
   more (i, a) (j, b) (ls, e) = (<|> pure e) $ do
     (rs, (kc, e)) <- ext $ do
       spc

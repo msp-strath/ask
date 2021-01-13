@@ -1,8 +1,10 @@
 module ChkRaw where
 
 import Data.List
+import Data.Char
 import qualified Data.Map as M
 import Control.Arrow ((***))
+
 import Debug.Trace
 
 import Thin
@@ -242,8 +244,8 @@ data CxE -- what sort of thing is in the context?
 
 
 applScoTm :: Appl -> (Context, TmR)
-applScoTm a = (ga, Our t a) where
-  (xs, t) = go a
+applScoTm a@(_, x) = (ga, Our t a) where
+  (xs, t) = go x
   ga = B0 <>< map Var (nub xs)
   ge x (ga :< Var y) = if x == y then 0 else 1 + ge x ga
   ge x (ga :< _)     = ge x ga
@@ -254,7 +256,7 @@ applScoTm a = (ga, Our t a) where
     (ys, ts) = traverse (go . snd) ras
 
 scoApplTm :: Context -> Appl -> Either String TmR
-scoApplTm ga a = (`Our` a) <$> go a
+scoApplTm ga a@(_, t) = ((`Our` a)) <$> go t
   where
     go ((t, _, y) :$$ ras) = case t of
       Lid -> TE <$> ((foldl (:$) . TV) <$> ge y ga <*> as)
@@ -267,15 +269,83 @@ scoApplTm ga a = (`Our` a) <$> go a
 mayl :: Maybe x -> [x]
 mayl = foldMap return
 
-pout :: Maybe WhereKind -> Context -> Prove Status TmR -> String
-pout mk ga p@(Prove g m s ps (h, b)) = case s of
+data Spot = AllOK | RadSpot | Infix (Int, Either Assocy Assocy) | Arg deriving (Show, Eq)
+
+assocHack :: Assocy -> Either Assocy Assocy
+assocHack LAsso = Left LAsso
+assocHack NAsso = Left NAsso -- yuk
+assocHack RAsso = Right RAsso
+
+instance Ord Spot where
+  compare AllOK AllOK = EQ
+  compare AllOK _     = LT
+  compare RadSpot AllOK = GT
+  compare RadSpot RadSpot = EQ
+  compare RadSpot _ = LT
+  compare (Infix _) AllOK = GT
+  compare (Infix _) RadSpot = GT
+  compare (Infix (i, x)) (Infix (j, y)) = case compare i j of
+    EQ -> case (x, y) of
+      (Left LAsso, Left LAsso) -> EQ
+      (Right RAsso, Right RAsso) -> EQ
+      _ -> GT -- wickedness!
+    c -> c
+
+pnom :: Context -> Int -> String
+pnom B0 i = "???" ++ show i
+pnom (ga :< Var x) 0 = x
+pnom (ga :< Var _) i = pnom ga (i - 1)
+pnom (ga :< _) i     = pnom ga i
+
+pppa :: Spot -> Spot -> String -> String
+pppa x y s = if x <= y then "(" ++ s ++ ")" else s
+
+readyTmR :: TmR -> Either Tm [LexL]
+readyTmR (My t) = Left t
+readyTmR (Our _ (ls, _)) = Right ls
+readyTmR (Your (ls, _)) = Right ls
+
+ppTmR :: Setup -> Context -> Spot -> TmR -> String
+ppTmR setup ga spot t = case readyTmR t of
+  Left t -> ppTm setup ga spot t
+  Right ls -> rfold lout ls ""
+
+ppTm :: Setup -> Context -> Spot -> Tm -> String
+ppTm setup ga spot (TC f@(c : s) as)
+  | isAlpha c = go f
+  | otherwise = case as of
+    [x, y] ->
+      let (p, a) = case M.lookup f (fixities setup) of
+            Nothing -> (9, LAsso)
+            Just x  -> x
+      in  pppa (Infix (p, assocHack a)) spot
+            (ppTm setup ga (Infix (p, Left a)) x
+             ++ " " ++ f ++ " " ++
+             ppTm setup ga (Infix (p, Right a)) y)
+    _ -> go ("(" ++ f ++ ")")
+ where
+  go f = case as of
+    [] -> f
+    _  -> pppa Arg spot (f ++ (as >>= ((" " ++) . ppTm setup ga Arg)))
+ppTm setup ga spot (TE e) = ppEl setup ga spot e
+ppTm _ _ _ t = show t
+
+ppEl :: Setup -> Context -> Spot -> Syn -> String
+ppEl setup ga _ (TV i) = pnom ga i
+ppEl setup ga spot (t ::: ty) = pppa RadSpot spot
+  (ppTm setup ga spot t ++ " :: " ++ ppTm setup ga spot ty)
+ppEl setup ga spot (f :$ s) = pppa Arg spot
+  (ppEl setup ga RadSpot f ++ " :: " ++ ppTm setup ga Arg s)
+
+pout :: Setup -> Maybe WhereKind -> Context -> Prove Status TmR -> String
+pout setup mk ga p@(Prove g m s ps (h, b)) = case s of
   Keep -> rfold lout h "" ++ psout b ps
+  Need -> "prove " ++ ppTmR setup ga AllOK g ++ " ?" ++ psout b ps
   Junk e -> fmat (case mk of { Nothing -> Dental 0; Just k -> k })
     [ "{- " ++ show e
     , rfold lout h . rfold lout b $ ""
     , "-}"
     ] ""
-  _ -> show p
  where
   hdent = case h of
     (Key, (_, d), "prove") : _ -> d - 1
@@ -302,7 +372,7 @@ pout mk ga p@(Prove g m s ps (h, b)) = case s of
     ["{-" ++ show e, rfold lout srg (rfold lout h (rfold lout b "")), "-}"]
   sub k ((srg, gs) ::- p) = return $
     (if null srg then givs gs else rfold lout srg)
-    (pout (Just k) (fish ga gs) p)
+    (pout setup (Just k) (fish ga gs) p)
   sub k (SubPGap ls) = [rfold lout ls ""]
   sub k (SubPGuff ls) = ["{- " ++ rfold lout ls " -}"]
   fish ga [] = ga
@@ -310,11 +380,14 @@ pout mk ga p@(Prove g m s ps (h, b)) = case s of
     Nothing -> fish ga gs
     Just h -> fish (ga :< Hyp h) gs
   givs [] = id
-  givs (g : gs) = ("given " ++) . (show g ++) . ((gs >>= ((", " ++) . show)) ++)
+  givs (g : gs) =
+    ("given " ++) . (wallop g ++) . ((gs >>= ((", " ++) . wallop)) ++) . (" " ++)
+    where
+      wallop (Given g) = ppTmR setup ga AllOK g
 
 filth :: String -> IO ()
 filth = mapM_ yuk . raw (fixities mySetup) where
   yuk (RawProof (Prove gr mr () ps src), _) =
-    putStr . pout Nothing ga $ chkProof mySetup ga g mr ps src where
+    putStr . pout mySetup Nothing ga $ chkProof mySetup ga g mr ps src where
     (ga, g) = applScoTm gr
   yuk (_, ls) = putStr $ rfold lout ls ""
