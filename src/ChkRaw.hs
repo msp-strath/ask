@@ -3,12 +3,15 @@ module ChkRaw where
 import Data.List
 import qualified Data.Map as M
 import Control.Arrow ((***))
+import Debug.Trace
 
 import Thin
 import Bwd
 import LexAsk
 import RawAsk
 import Tm
+
+track = trace
 
 data Setup = Setup
   { introRules :: [Rule]
@@ -265,7 +268,7 @@ mayl :: Maybe x -> [x]
 mayl = foldMap return
 
 pout :: Maybe WhereKind -> Context -> Prove Status TmR -> String
-pout mk ga p@(Prove g m s ps (h, b)) = case s of
+pout mk ga p@(Prove g m s ps (h, b)) = track (show mk) $ case s of
   Keep -> rfold lout h "" ++ psout b ps
   Junk e -> fmat (case mk of { Nothing -> Dental 0; Just k -> k })
     [ "{- " ++ show e
@@ -275,7 +278,7 @@ pout mk ga p@(Prove g m s ps (h, b)) = case s of
   _ -> show p
  where
   hdent = case h of
-    (Key, (_, d), "prove") : _ -> d
+    (Key, (_, d), "prove") : _ -> d - 1
     _ -> 0
   psout :: [LexL] -> [SubProve Status TmR] -> String
   psout ((T ((_,"where",gap) :-! m),_,_): ls) ps = ("where" ++) . rfold lout gap $
