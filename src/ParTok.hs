@@ -90,6 +90,19 @@ lol k p = ParTok $ \case
   glom Stop = return []
   glom (_ :-/ m) = grok m
 
+lolSpc :: String -> ParTok x -> ParTok [x]
+lolSpc k p = ParTok $ \case
+  l@(T ((_, h, _) :-! m) , _, _) : ls | h == k -> case m of
+    Nothing -> [([l], [], ls)]
+    Just (_, pl, _) -> grok pl >>= \ x -> [([l], x, ls)]
+  _ -> []
+  where
+  grok (ks :-& m) = do
+    (_, x, []) <- parTok p ks
+    (x :) <$> glom m
+  glom Stop = return []
+  glom (_ :-/ m) = grok m
+
 ext :: ParTok x -> ParTok ([LexL], x)
 ext p = ParTok $ \ ls -> do
   (ks, x, us) <- parTok p ls

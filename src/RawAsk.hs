@@ -68,22 +68,36 @@ data Prove a t
   { goal       :: t
   , method     :: Method t
   , annotation :: a
-  , subproofs  :: [([Given t], Prove a t)]
+  , subproofs  :: [([LexL], SubProve a t)]
+  , source     :: ([LexL], [LexL])
   } deriving (Show, Functor)
 
+data SubProve a t
+  = [Given t] ::- Prove a t
+  | SubPGap
+  | SubPGuff
+  deriving (Show, Functor)
+
 pProve :: FixityTable -> ParTok (Prove () Appl)
-pProve ft = Prove <$ the Key "prove"
-  <*> spd (pAppl ft)
-  <*> spd pMethod
-  <*> pure ()
-  <*> pSubs
+pProve ft = do
+  (top, (go, me)) <- ext $
+    (,) <$ the Key "prove" <*> spd (pAppl ft) <*> spd pMethod
+  (body, ps) <- ext pSubs
+  return $ Prove
+    { goal       = go
+    , method     = me
+    , annotation = ()
+    , subproofs  = ps
+    , source     = (top, body)
+    }
   where
   pMethod
     =   Stub <$ the Sym "?" <* spc
     <|> By   <$ the Key "by"   <*> spd (pAppl ft)
     <|> From <$ the Key "from" <*> spd (pAppl ft)
-  pSubs = lol "where" pSub <|> [] <$ spc
-  pSub = (,) <$> pGivens <*> pProve ft
+  pSubs = lolSpc "where" (ext pSub) <|> [] <$ spc
+  pSub = ((::-) <$> pGivens <*> pProve ft <|> SubPGap <$ spc <* eol) ?>
+    (SubPGuff <$ many (eat Just))
   pGivens
     =   id <$ the Key "given" <*> sep (Given <$> pAppl ft) (the Sym ",")
     <|> pure []

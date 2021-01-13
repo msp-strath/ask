@@ -291,3 +291,17 @@ lines2List (l :-& m) = l : case m of
 
 lexPhase1 :: [Lex0] -> Lines LexL
 lexPhase1 ts = ls where (ls, _, _) = laylines ("", 1) ts
+
+rfold :: (x -> t -> t) -> [x] -> t -> t
+rfold t2t xs t = foldr t2t t xs
+
+lout :: LexL -> String -> String
+lout (T ((_, x, lp) :-! m), _ , _) = (x ++) . rfold lout lp . case m of
+  Nothing -> id
+  Just (lo, lls, lc) -> lout lo . go lls . lout lc
+ where
+  go (ls :-& m) = rfold lout ls . case m of
+    Stop -> id
+    lm :-/ lls -> lout lm . go lls
+lout (T (LB lo ls lc), _, _) = lout lo . rfold lout ls . lout lc
+lout (_, _, s) = (s ++)

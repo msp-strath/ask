@@ -2,6 +2,7 @@ module ChkRaw where
 
 import Data.List
 import qualified Data.Map as M
+import Control.Arrow ((***))
 
 import Thin
 import Bwd
@@ -88,9 +89,12 @@ data Gripe
   deriving (Show, Eq)
 
 passive :: Prove () Appl -> Prove Status TmR
-passive (Prove g m () ps) = Prove (Your g) (fmap Your m) Keep (map subPassive ps)
-subPassive :: ([Given Appl], Prove () Appl) -> ([Given TmR], Prove Status TmR)
-subPassive (gs, p) = (map (fmap Your) gs, passive p)
+passive (Prove g m () ps src) =
+  Prove (Your g) (fmap Your m) Keep (map (id *** subPassive) ps) src
+subPassive :: SubProve () Appl -> SubProve Status TmR
+subPassive (gs ::- p) = map (fmap Your) gs ::- passive p
+subPassive SubPGap  = SubPGap
+subPassive SubPGuff = SubPGuff
 
 -- this type is highly provisional
 chkProof
@@ -98,31 +102,33 @@ chkProof
   -> Context     -- what do we know?
   -> TmR         -- the goal
   -> Method Appl -- the method
-  -> [([Given Appl], Prove () Appl)]  -- the subproofs
+  -> [([LexL], SubProve () Appl)]  -- the subproofs
+  -> ([LexL], [LexL])  -- source tokens (head, body)
   -> Prove Status TmR  -- the reconstructed proof
 
-chkProof setup ga g m ps = case my g of
+chkProof setup ga g m ps src = case my g of
   Just gt -> case m of
-    Stub -> Prove
-      g Stub Keep (map subPassive ps)
+    Stub -> Prove g Stub Keep
+      (map (id *** subPassive) ps) src
     By r -> case scoApplTm ga r of
-      Left x -> Prove
-        g (By (Your r)) (Junk (Scope x)) (map subPassive ps)
+      Left x -> Prove g (By (Your r)) (Junk (Scope x))
+        (map (id *** subPassive) ps) src
       Right r@(Our rt _) -> case
         [ stan (mgh ++ mmn) ss
         | ((h, n) :<= ss) <- byRules setup
         , mgh <- mayl $ match mempty h gt
         , mmn <- mayl $ match mempty n rt
         ] of
-        [ss] -> Prove g (By r) Keep (chkSubProofs setup ga ss ps)
-        _ -> Prove g (By r) (Junk Mardiness) (map subPassive ps)
+        [ss] -> Prove g (By r) Keep (chkSubProofs setup ga ss ps) src
+        _ -> Prove g (By r) (Junk Mardiness)
+          (map (id *** subPassive) ps) src
     From h -> case scoApplTm ga h of
-      Left x -> Prove
-        g (From (Your h)) (Junk (Scope x)) (map subPassive ps)
-      Right h@(Our ht _) -> Prove
-        g (From h) Keep
-          (chkSubProofs setup ga (fromSubs setup ga gt ht) ps)
-  Nothing -> Prove g (fmap Your m) (Junk Mardiness) (map subPassive ps)
+      Left x -> Prove g (From (Your h)) (Junk (Scope x))
+        (map (id *** subPassive) ps) src
+      Right h@(Our ht _) -> Prove g (From h) Keep
+        (chkSubProofs setup ga (fromSubs setup ga gt ht) ps) src
+  Nothing -> Prove g (fmap Your m) (Junk Mardiness)
+    (map (id *** subPassive) ps) src
 
 -- checking subproofs amounts to validating them,
 -- then checking which subgoals are covered,
@@ -133,33 +139,40 @@ chkSubProofs
   :: Setup
   -> Context                    -- what do we know?
   -> [Tm]                       -- subgoals expected from rule
-  -> [([Given Appl], Prove () Appl)]   -- subproofs expected from user
-  -> [([Given TmR], Prove Status TmR)] -- reconstruction
-chkSubProofs setup ga ss ps = map squish qs ++ extra us where
-  (qs, us) = cover ss $ map ((,) False . validSubProof setup ga) ps
+  -> [([LexL], SubProve () Appl)]   -- subproofs expected from user
+  -> [([LexL], SubProve Status TmR)] -- reconstruction
+chkSubProofs setup ga ss ps = map (id *** squish) qs ++ extra us where
+  (qs, us) = cover ss $ map (id *** ((,) False . validSubProof setup ga)) ps
   cover [] qs = (qs, [])
   cover (t : ts) qs = case cover1 t qs of
     Nothing -> case cover ts qs of
       (qs, ts) -> (qs, t : ts)
     Just qs -> cover ts qs
+  cover1 :: Tm -> [([LexL], (Bool, SubProve Status TmR))]
+               -> Maybe [([LexL], (Bool, SubProve Status TmR))]
   cover1 t [] = Nothing
-  cover1 t (q@(_, p) : qs)
-    | covers t p = Just ((True, p) : qs)
+  cover1 t ((src, (_, p)) : qs)
+    | covers t p = Just ((src, (True, p)) : qs)
     | otherwise  = cover1 t qs
-  covers t (hs, Prove g m Keep sps) = case (subgoal (ga, t), my g) of
+  covers :: Tm -> SubProve Status TmR -> Bool
+  covers t (hs ::- Prove g m Keep _ _) = case (subgoal (ga, t), my g) of
     (Just (ga, p), Just g) -> all (ga `gives`) hs && (g == p)
     _ -> False
-  squish (False, (gs, Prove g m Keep ss)) = (gs, Prove g m (Junk Surplus) ss)
+  covers t _ = False
+  squish :: (Bool, SubProve Status TmR) -> SubProve Status TmR
+  squish (False, gs ::- Prove g m Keep ss src) = gs ::- Prove g m (Junk Surplus) ss src
   squish (_, q) = q
+  extra :: [Tm] -> [([LexL], SubProve Status TmR)]
   extra [] = []
   extra (u : us) = case subgoal (ga, u) of
     Nothing -> extra us
     Just (ga, g)
       | gives ga (Given (My g)) -> extra us
-      | otherwise -> need u : extra us
-  need (TC "prove" [g]) = ([], Prove (My g) Stub Need [])
+      | otherwise -> ([], need u) : extra us
+  need (TC "prove" [g]) = [] ::- Prove (My g) Stub Need [] ([], [])
   need (TC "given" [h, u]) = case need u of
-    (gs, p) -> (Given (My h) : gs, p)
+    gs ::- p -> (Given (My h) : gs) ::- p
+    s -> s
 
 subgoal :: (Context, Tm) -> Maybe (Context, Tm)
 subgoal (ga, TC "given" [h, g]) = subgoal (ga :< Hyp h, g)
@@ -174,16 +187,22 @@ gives ga (Given h) = case my h of
 validSubProof
   :: Setup
   -> Context
-  -> ([Given Appl], Prove () Appl)
-  -> ([Given TmR], Prove Status TmR)
-validSubProof setup ga (Given h : gs, p@(Prove sg sm () sps)) = case scoApplTm ga h of
-  Left x -> (map (fmap Your) (Given h : gs),
-             Prove (Your sg) (fmap Your sm) (Junk (Scope x)) (map subPassive sps))
-  Right h@(Our ht _) -> case validSubProof setup (ga :< Hyp ht) (gs, p) of
-    (gs, p) -> (Given h : gs, p)
-validSubProof setup ga ([], Prove sg sm () sps) = case scoApplTm ga sg of
-  Left x -> ([], Prove  (Your sg) (fmap Your sm) (Junk (Scope x)) (map subPassive sps))
-  Right sg -> ([], chkProof setup ga sg sm sps)
+  -> SubProve () Appl
+  -> SubProve Status TmR
+validSubProof setup ga ((Given h : gs) ::- p@(Prove sg sm () sps src)) =
+  case scoApplTm ga h of
+    Left x -> map (fmap Your) (Given h : gs) ::-
+      Prove (Your sg) (fmap Your sm) (Junk (Scope x))
+        (map (id *** subPassive) sps) src
+    Right h@(Our ht _) -> case validSubProof setup (ga :< Hyp ht) (gs ::- p) of
+      gs ::- p -> (Given h : gs) ::- p
+      s -> s
+validSubProof setup ga ([] ::- Prove sg sm () sps src) = case scoApplTm ga sg of
+  Left x -> [] ::- Prove  (Your sg) (fmap Your sm) (Junk (Scope x))
+    (map (id *** subPassive) sps) src
+  Right sg -> [] ::- chkProof setup ga sg sm sps src
+validSubProof _ _ SubPGap = SubPGap
+validSubProof _ _ SubPGuff = SubPGuff
 
 fromSubs
   :: Setup
@@ -244,7 +263,7 @@ mayl = foldMap return
 
 filth :: String -> IO ()
 filth = mapM_ yuk . raw (fixities mySetup) where
-  yuk (RawProof (Prove gr mr () ps), _) =
-    print $ chkProof mySetup ga g mr ps where
+  yuk (RawProof (Prove gr mr () ps src), _) =
+    print $ chkProof mySetup ga g mr ps src where
     (ga, g) = applScoTm gr
-  yuk (p, _) = print p
+  yuk (_, ls) = putStr $ rfold lout ls ""
