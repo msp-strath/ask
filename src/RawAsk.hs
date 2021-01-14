@@ -92,8 +92,8 @@ instance (Show a, Show t) => Show (SubProve a t) where
 pProve :: FixityTable -> ParTok (Prove () Appl)
 pProve ft = do
   (top, (go, me)) <- ext $
-    (,) <$ the Key "prove" <*> spd (pAppl ft) <*> spd pMethod
-  (body, ps) <- ext pSubs
+    (,) <$ the Key "prove" <* spc <*> pAppl ft <* spc <*> pMethod
+  (body, ps) <- ext (id <$ spc <*> pSubs)
   return $ Prove
     { goal       = go
     , method     = me
@@ -103,10 +103,10 @@ pProve ft = do
     }
   where
   pMethod
-    =   Stub <$ the Sym "?" <* spc
-    <|> By   <$ the Key "by"   <*> spd (pAppl ft)
-    <|> From <$ the Key "from" <*> spd (pAppl ft)
-  pSubs = lolSpc "where" pSub <|> [] <$ spc
+    =   Stub <$ the Sym "?"
+    <|> By   <$ the Key "by"   <* spc <*> pAppl ft
+    <|> From <$ the Key "from" <* spc <*> pAppl ft
+  pSubs = lolSpc "where" pSub <|> pure []
   pSub = ((::-) <$> ext pGivens <*> pProve ft <|> (SubPGap . fst) <$> ext (spc <* eol)) ?>
     ((SubPGuff . fst) <$> ext (many (eat Just)))
   pGivens
@@ -178,7 +178,7 @@ pAppl' ftab = go where
     Nothing -> (9, LAsso)
     Just f  -> f
   start :: (Int, Assocy) -> ParTok Appl'
-  start f = (spd . ext $ (($$) <$> wee <*> many (spd . ext $ wee))) >>= more f (maxBound, NAsso)
+  start f = (ext $ (($$) <$> wee <*> many (id <$ spc <*> ext wee))) >>= more f (maxBound, NAsso)
   wee :: ParTok Appl'
   wee = (:$$ []) <$>
      (kinda Uid <|> kinda Lid <|>

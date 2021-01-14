@@ -339,8 +339,8 @@ ppEl setup ga spot (t ::: ty) = pppa spot Rad
 ppEl setup ga spot (f :$ s) = pppa spot App
   (ppEl setup ga RadSpot f ++ " :: " ++ ppTm setup ga Arg s)
 
-pout :: Setup -> Maybe WhereKind -> Context -> Prove Status TmR -> String
-pout setup mk ga p@(Prove g m s ps (h, b)) = case s of
+pout :: Setup -> (Maybe WhereKind, Maybe Int) -> Context -> Prove Status TmR -> String
+pout setup (mk, mc) ga p@(Prove g m s ps (h, b)) = case s of
   Keep -> rfold lout h "" ++ psout b ps
   Need -> "prove " ++ ppTmR setup ga AllOK g ++ " ?" ++ psout b ps
   Junk e -> fmat (case mk of { Nothing -> Dental 0; Just k -> k })
@@ -349,19 +349,21 @@ pout setup mk ga p@(Prove g m s ps (h, b)) = case s of
     , "-}"
     ] ""
  where
-  hdent = case h of
-    (Key, (_, d), "prove") : _ -> d - 1
+  hdent = case (mc, h) of
+    (Just c, _) -> c
+    (_, (Key, (_, d), "prove") : _) -> d - 1
     _ -> 0
   psout :: [LexL] -> [SubProve Status TmR] -> String
-  psout ((T ((_,"where",gap) :-! m),_,_): ls) ps = ("where" ++) . rfold lout gap $
-    case whereKind hdent m of
-      k@(Dental d) -> fmat k (ps >>= sub k) (rfold lout ls "")
-      k@(Bracy pre semi post) -> "{" ++ rfold lout pre (fmat k (ps >>= sub k) (rfold lout ls ""))
-  psout _ [] = ""
-  psout ls ps =
-    (if null ls then " " else "") ++ "where\n" ++ replicate (hdent + 2) ' ' ++
-    fmat k (ps >>= sub k) ""
-    where k = Dental (hdent + 2)
+  psout b ps = case span gappy b of
+    (g, (T ((_,"where",gap) :-! m),_,_): ls) ->
+      rfold lout g . ("where" ++) . rfold lout gap $ case whereKind hdent m of
+        k@(Dental d) -> fmat k (ps >>= sub k) (rfold lout ls "")
+        k@(Bracy pre semi post) -> "{" ++ rfold lout pre (fmat k (ps >>= sub k) (rfold lout ls ""))
+    _ | null ps -> ""  -- rly?
+    _ ->
+      " where\n" ++ replicate (hdent + 2) ' ' ++
+      fmat k (ps >>= sub k) ""
+      where k = Dental (hdent + 2)
   fmat :: WhereKind -> [String] -> String -> String
   fmat (Dental d) [] = id
   fmat (Bracy _ _ _) [] = ("{" ++)
@@ -374,7 +376,11 @@ pout setup mk ga p@(Prove g m s ps (h, b)) = case s of
     ["{-" ++ show e, rfold lout srg (rfold lout h (rfold lout b "")), "-}"]
   sub k ((srg, gs) ::- p) = return $
     (if null srg then givs gs else rfold lout srg)
-    (pout setup (Just k) (fish ga gs) p)
+    (pout setup (Just k, mc) (fish ga gs) p)
+    where
+    mc = case span gappy srg of
+      (_, (_, (_, x), _) : _) -> Just (x - 1)
+      _ -> Nothing
   sub k (SubPGap ls) = [rfold lout ls ""]
   sub k (SubPGuff ls) = ["{- " ++ rfold lout ls " -}"]
   fish ga [] = ga
@@ -390,6 +396,6 @@ pout setup mk ga p@(Prove g m s ps (h, b)) = case s of
 filth :: String -> IO ()
 filth s = mapM_ yuk (raw (fixities mySetup) s) >> putStrLn "" where
   yuk (RawProof (Prove gr mr () ps src), _) =
-    putStr . pout mySetup Nothing ga $ chkProof mySetup ga g mr ps src where
+    putStr . pout mySetup (Nothing, Nothing) ga $ chkProof mySetup ga g mr ps src where
     (ga, g) = applScoTm gr
   yuk (_, ls) = putStr $ rfold lout ls ""
