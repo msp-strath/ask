@@ -70,13 +70,24 @@ data Prove a t
   , annotation :: a
   , subproofs  :: [SubProve a t]
   , source     :: ([LexL], [LexL])
-  } deriving (Show, Functor)
+  } deriving (Functor)
+
+instance (Show a, Show t) => Show (Prove a t) where
+  show p = concat
+    [ show (goal p), " "
+    , show (method p), " "
+    , show (annotation p), "\n"
+    , show (subproofs p)
+    ]
 
 data SubProve a t
   = ([LexL], [Given t]) ::- Prove a t
   | SubPGap [LexL]
   | SubPGuff [LexL]
-  deriving (Show, Functor)
+  deriving (Functor)
+
+instance (Show a, Show t) => Show (SubProve a t) where
+  show ((_, gs) ::- p) = show gs ++ " |- " ++ show p
 
 pProve :: FixityTable -> ParTok (Prove () Appl)
 pProve ft = do
@@ -147,7 +158,10 @@ fixity = actual ?> pure M.empty where
   mkTable a i xs = M.fromList [(x, (i, a)) | x <- xs]
 
 type Appl = ([LexL], Appl')
-data Appl' = LexL :$$ [Appl] deriving Show
+data Appl' = LexL :$$ [Appl]
+
+instance Show Appl' where
+  show ((_,_,f) :$$ las) = f ++ show (map snd las)
 
 ($$) :: Appl' -> [Appl] -> Appl'
 (h :$$ as) $$ bs = h :$$ (as ++ bs)

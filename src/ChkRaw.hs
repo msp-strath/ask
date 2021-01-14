@@ -74,7 +74,10 @@ data TmR
   = My Tm
   | Our Tm Appl
   | Your Appl
-  deriving Show
+instance Show TmR where
+  show (My t) = show t
+  show (Our t _) = show t
+  show (Your (_, a)) = show a
 
 my :: TmR -> Maybe Tm
 my (My t) = Just t
@@ -159,9 +162,9 @@ chkSubProofs setup ga ss ps = map squish qs ++ extra us where
   cover1 :: Tm -> [(Bool, SubProve Status TmR)]
                -> Maybe [(Bool, SubProve Status TmR)]
   cover1 t [] = Nothing
-  cover1 t ((_, p) : qs)
+  cover1 t ((b, p) : qs)
     | covers t p = Just ((True, p) : qs)
-    | otherwise  = cover1 t qs
+    | otherwise  = ((b, p) :) <$> cover1 t qs
   covers :: Tm -> SubProve Status TmR -> Bool
   covers t ((_, hs) ::- Prove g m Keep _ _) = case (subgoal (ga, t), my g) of
     (Just (ga, p), Just g) -> all (ga `gives`) hs && (g == p)
@@ -385,7 +388,7 @@ pout setup mk ga p@(Prove g m s ps (h, b)) = case s of
       wallop (Given g) = ppTmR setup ga AllOK g
 
 filth :: String -> IO ()
-filth = mapM_ yuk . raw (fixities mySetup) where
+filth s = mapM_ yuk (raw (fixities mySetup) s) >> putStrLn "" where
   yuk (RawProof (Prove gr mr () ps src), _) =
     putStr . pout mySetup Nothing ga $ chkProof mySetup ga g mr ps src where
     (ga, g) = applScoTm gr
