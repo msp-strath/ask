@@ -1,0 +1,33 @@
+<!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML//EN">
+<html> <head>
+<title>Testing Testing 1, 2, 3</title>
+</head>
+
+<body>
+<h1>Trying a Thing or Two</h1>
+
+<pre id="tweedledum">
+Pies.
+The sky is all pies.
+</pre>
+
+<form>
+<textarea name="fankle" rows="10" cols="30" id="tweedledee">
+</textarea>
+</form>
+
+<p id="boo">bing</p>
+
+<script>
+function exchange() {
+var x = document.getElementById("tweedledum").textContent;
+var y = document.getElementById("tweedledee").value;
+document.getElementById("tweedledee").value = x;
+document.getElementById("tweedledum").textContent = y;
+document.getElementById("boo").innerHTML = "bong";
+}
+</script>
+
+<button onclick="exchange()">Click me</button> 
+
+</body> </html>
