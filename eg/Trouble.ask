@@ -1,3 +1,12 @@
 prove ((a -> c) -> a) & (a & (b -> c) -> b) & (b -> c) -> b by ImpI where
   given ((a -> c) -> a) & (a & (b -> c) -> b) & (b -> c) prove b from ((a -> c) -> a) & (a & (b -> c) -> b) & (b -> c) where
-    given (a -> c) -> a, (a & (b -> c) -> b) & (b -> c) prove b from (a & (b -> c) -> b) & (b -> c)
+    given (a -> c) -> a, (a & (b -> c) -> b) & (b -> c) prove b from (a & (b -> c) -> b) & (b -> c) where
+      given a & (b -> c) -> b, b -> c prove b from (a -> c) -> b where
+        prove (a -> c) -> b by ImpI where
+          given a -> c prove b from a & (b -> c) -> b where
+            prove a & (b -> c) from (a -> c) -> a where
+              given a prove a & (b -> c) by AndI
+        prove a -> c by ImpI where
+          given a prove c from b -> c where
+            prove b from a & (b -> c) -> b where
+              prove a & (b -> c) by AndI

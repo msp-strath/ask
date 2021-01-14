@@ -88,6 +88,8 @@ data SubProve a t
 
 instance (Show a, Show t) => Show (SubProve a t) where
   show ((_, gs) ::- p) = show gs ++ " |- " ++ show p
+  show (SubPGap ls) = "SubPGap " ++ show ls
+  show (SubPGuff ls) = "SubPGuff " ++ show ls
 
 pProve :: FixityTable -> ParTok (Prove () Appl)
 pProve ft = do
@@ -107,8 +109,8 @@ pProve ft = do
     <|> By   <$ the Key "by"   <* spc <*> pAppl ft
     <|> From <$ the Key "from" <* spc <*> pAppl ft
   pSubs = lolSpc "where" pSub <|> pure []
-  pSub = ((::-) <$> ext pGivens <*> pProve ft <|> (SubPGap . fst) <$> ext (spc <* eol)) ?>
-    ((SubPGuff . fst) <$> ext (many (eat Just)))
+  pSub = ((::-) <$> ext pGivens <*> pProve ft <* spc <* eol <|> (SubPGap . fst) <$> ext (spc <* eol)) ?>
+    ((SubPGuff . fst) <$> ext (many (eat Just) <* eol))
   pGivens
     =   id <$ the Key "given" <*> sep (Given <$> pAppl ft) (the Sym ",")
     <|> pure []
