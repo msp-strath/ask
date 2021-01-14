@@ -270,26 +270,17 @@ mayl :: Maybe x -> [x]
 mayl = foldMap return
 
 data Spot = AllOK | RadSpot | Infix (Int, Either Assocy Assocy) | Arg deriving (Show, Eq)
-
-assocHack :: Assocy -> Either Assocy Assocy
-assocHack LAsso = Left LAsso
-assocHack NAsso = Left NAsso -- yuk
-assocHack RAsso = Right RAsso
-
-instance Ord Spot where
-  compare AllOK AllOK = EQ
-  compare AllOK _     = LT
-  compare RadSpot AllOK = GT
-  compare RadSpot RadSpot = EQ
-  compare RadSpot _ = LT
-  compare (Infix _) AllOK = GT
-  compare (Infix _) RadSpot = GT
-  compare (Infix (i, x)) (Infix (j, y)) = case compare i j of
-    EQ -> case (x, y) of
-      (Left LAsso, Left LAsso) -> EQ
-      (Right RAsso, Right RAsso) -> EQ
-      _ -> GT -- wickedness!
-    c -> c
+data Wot = Rad | Inf (Int, Assocy) | App deriving (Show, Eq)
+instance Ord Wot where
+  compare Rad Rad = EQ
+  compare Rad (Inf _) = LT
+  compare Rad App = LT
+  compare (Inf _) Rad = GT
+  compare (Inf (i, _)) (Inf (j, _)) = compare i j
+  compare (Inf _) App = LT
+  compare App App = EQ
+  compare App _   = GT
+  -- x <= y means you can put a y anywhere you can put an x with no parens
 
 pnom :: Context -> Int -> String
 pnom B0 i = "???" ++ show i
@@ -297,8 +288,16 @@ pnom (ga :< Var x) 0 = x
 pnom (ga :< Var _) i = pnom ga (i - 1)
 pnom (ga :< _) i     = pnom ga i
 
-pppa :: Spot -> Spot -> String -> String
-pppa x y s = if x <= y then "(" ++ s ++ ")" else s
+pppa :: Spot -> Wot -> String -> String
+pppa x y s = if paren x y then "(" ++ s ++ ")" else s where
+  paren AllOK _ = False
+  paren RadSpot w = w <= Rad
+  paren (Infix (i, a)) (Inf (j, b)) =
+    j < i || (j == i && case (a, b) of
+      (Left LAsso, LAsso) -> False
+      (Right RAsso, RAsso) -> False
+      _ -> True)
+  paren _ _ = True
 
 readyTmR :: TmR -> Either Tm [LexL]
 readyTmR (My t) = Left t
@@ -318,7 +317,7 @@ ppTm setup ga spot (TC f@(c : s) as)
       let (p, a) = case M.lookup f (fixities setup) of
             Nothing -> (9, LAsso)
             Just x  -> x
-      in  pppa (Infix (p, assocHack a)) spot
+      in  pppa spot (Inf (p, a))
             (ppTm setup ga (Infix (p, Left a)) x
              ++ " " ++ f ++ " " ++
              ppTm setup ga (Infix (p, Right a)) y)
@@ -326,15 +325,15 @@ ppTm setup ga spot (TC f@(c : s) as)
  where
   go f = case as of
     [] -> f
-    _  -> pppa Arg spot (f ++ (as >>= ((" " ++) . ppTm setup ga Arg)))
+    _  -> pppa spot App (f ++ (as >>= ((" " ++) . ppTm setup ga Arg)))
 ppTm setup ga spot (TE e) = ppEl setup ga spot e
 ppTm _ _ _ t = show t
 
 ppEl :: Setup -> Context -> Spot -> Syn -> String
 ppEl setup ga _ (TV i) = pnom ga i
-ppEl setup ga spot (t ::: ty) = pppa RadSpot spot
-  (ppTm setup ga spot t ++ " :: " ++ ppTm setup ga spot ty)
-ppEl setup ga spot (f :$ s) = pppa Arg spot
+ppEl setup ga spot (t ::: ty) = pppa spot Rad
+  (ppTm setup ga RadSpot t ++ " :: " ++ ppTm setup ga RadSpot ty)
+ppEl setup ga spot (f :$ s) = pppa spot App
   (ppEl setup ga RadSpot f ++ " :: " ++ ppTm setup ga Arg s)
 
 pout :: Setup -> Maybe WhereKind -> Context -> Prove Status TmR -> String
