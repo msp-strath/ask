@@ -2,6 +2,7 @@
 
 module Elab where  -- mothballed for now
 
+{-
 import HalfZip
 import Bwd
 import LexAsk
@@ -134,3 +135,4 @@ instance Applicative Elab where
 
 instance Functor Elab where
   fmap = ap . return
+-}
