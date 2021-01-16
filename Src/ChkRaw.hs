@@ -393,10 +393,10 @@ pout setup (mk, mc) ga p@(Prove g m s ps (h, b)) = case s of
     where
       wallop (Given g) = ppTmR setup ga AllOK g
 
-filth :: String -> IO ()
-filth s = mapM_ yuk (raw (fixities mySetup) s) where
+filth :: String -> String
+filth s = foldMap yuk (raw (fixities mySetup) s) where
   yuk (RawProof (Prove gr mr () ps src), _) =
-    putStr . pout mySetup (Nothing, Nothing) ga $ chkProof mySetup ga g mr ps src where
+    pout mySetup (Nothing, Nothing) ga $ chkProof mySetup ga g mr ps src where
     (ga, g) = applScoTm gr
-  yuk (RawSewage, ls) = putStr $ "{- don't ask\n" ++ rfold lout ls "-}\n"
-  yuk (_, ls) = putStr $ rfold lout ls ""
+  yuk (RawSewage, ls) = "{- don't ask\n" ++ rfold lout ls "-}\n"
+  yuk (_, ls) = rfold lout ls ""
