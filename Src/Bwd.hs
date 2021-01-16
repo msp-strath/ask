@@ -1,6 +1,6 @@
 {-# LANGUAGE DeriveTraversable #-}
 
-module Bwd where
+module Ask.Src.Bwd where
 
 data Bwd x = B0 | Bwd x :< x deriving (Show, Eq, Ord, Functor, Foldable, Traversable)
 

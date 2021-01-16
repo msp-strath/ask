@@ -2,11 +2,11 @@
     DeriveFunctor
 #-}
 
-module RawAsk where
+module Ask.Src.RawAsk where
 
-import Bwd
-import LexAsk
-import ParTok
+import Ask.Src.Bwd
+import Ask.Src.LexAsk
+import Ask.Src.ParTok
 
 import qualified Data.Map as M
 import Control.Applicative

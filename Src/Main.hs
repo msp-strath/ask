@@ -1,6 +1,6 @@
-module Main where
+module Ask.Src.Main where
 
-import ChkRaw
+import Ask.Src.ChkRaw
 
 main :: IO ()
 main = getContents >>= filth

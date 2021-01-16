@@ -4,14 +4,14 @@
            , FlexibleInstances
 #-}
 
-module Tm where
+module Ask.Src.Tm where
 
 import Data.Bits
 import Data.List
 import Control.Applicative
 
-import Thin
-import HalfZip
+import Ask.Src.Thin
+import Ask.Src.HalfZip
 
 type Con = String
 

@@ -1,11 +1,11 @@
 {-# LANGUAGE EmptyDataDeriving, DeriveFunctor #-}
 
-module LexAsk where
+module Ask.Src.LexAsk where
 
 import Data.Char
 import Data.List
 
-import Bwd
+import Ask.Src.Bwd
 
 {-
 Let's not do full-on Haskell lexing.

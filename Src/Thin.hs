@@ -1,4 +1,4 @@
-module Thin where
+module Ask.Src.Thin where
 
 import Data.Bits
 

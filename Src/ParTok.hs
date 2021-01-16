@@ -4,7 +4,7 @@
   , LambdaCase
 #-}
 
-module ParTok where
+module Ask.Src.ParTok where
 
 import Control.Monad
 import Control.Applicative
@@ -12,8 +12,8 @@ import Data.List
 
 import Debug.Trace
 
-import Bwd
-import LexAsk
+import Ask.Src.Bwd
+import Ask.Src.LexAsk
 
 newtype ParTok x = ParTok {parTok
   :: [LexL]

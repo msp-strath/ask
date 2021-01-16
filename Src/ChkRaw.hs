@@ -1,4 +1,4 @@
-module ChkRaw where
+module Ask.Src.ChkRaw where
 
 import Data.List
 import Data.Char
@@ -7,11 +7,11 @@ import Control.Arrow ((***))
 
 import Debug.Trace
 
-import Thin
-import Bwd
-import LexAsk
-import RawAsk
-import Tm
+import Ask.Src.Thin
+import Ask.Src.Bwd
+import Ask.Src.LexAsk
+import Ask.Src.RawAsk
+import Ask.Src.Tm
 
 track = trace
 
