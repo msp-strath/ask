@@ -34,6 +34,9 @@ type Lex f = (Tok f, Pos, String)
 txt :: Lex f -> String
 txt (_, _, s) = s
 
+bad :: Lex f -> Lex f
+bad (_, p, s) = (Bad, p, s)
+
 class PShow f where
   pshow :: Show x => f x -> String
 
@@ -271,18 +274,24 @@ laylines (k, i) ls = case munch False (k, i) ls of
 brackety :: Bwd (Bwd LexL, LexL) -> Bwd LexL -> [LexL] -> [LexL]
 brackety bz lz [] = dump bz (lz <>> []) where
   dump B0 ls = ls
-  dump (bz :< (kz, k)) ls = dump bz (kz <>> (k : ls))
+  dump (bz :< (kz, k)) ls = dump bz (kz <>> (bad k : ls))
 brackety bz lz (l@(Sym, _, [o]) : ls) | o `elem` "([{" =
   brackety (bz :< (lz, l)) B0 ls
 brackety bz lz (l@(Sym, _, [c]) : ls) | c `elem` ")]}" =
   blat bz lz where
-  blat B0 lz = brackety B0 (lz :< l) ls
+  blat B0 lz = brackety B0 (lz :< bad l) ls
   blat (bz :< (kz, k@(_, p, [o]))) lz
-    | abs (ord c - ord o) < 3 -- matches the open
+    | brackMatch o c
     = brackety bz (kz :< (T (LB k (lz <>> []) l), p, "")) ls
     | otherwise -- bad
-    = blat bz ((kz :< k) <> lz)
+    = blat bz ((kz :< bad k) <> lz)
 brackety bz lz (l : ls) = brackety bz (lz :< l) ls
+
+brackMatch :: Char -> Char -> Bool
+brackMatch '(' ')' = True
+brackMatch '[' ']' = True
+brackMatch '{' '}' = True
+brackMatch _   _   = False
 
 lines2List :: Lines LexL -> [[LexL]]
 lines2List (l :-& m) = l : case m of
