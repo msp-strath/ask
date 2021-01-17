@@ -359,7 +359,7 @@ pout setup (mk, mc) ga p@(Prove g m s ps (h, b)) = case s of
       rfold lout g . ("where" ++) . rfold lout gap $ case whereKind hdent m of
         k@(Dental d) -> fmat k (ps >>= sub k) (rfold lout ls "")
         k@(Bracy pre semi post) -> "{" ++ rfold lout pre (fmat k (ps >>= sub k) (rfold lout ls ""))
-    _ | null ps -> ""  -- rly?
+    _ | null ps -> rfold lout b ""
     _ ->
       " where\n" ++ replicate (hdent + 2) ' ' ++
       fmat k (ps >>= sub k) (rfold lout b "")
