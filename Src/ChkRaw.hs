@@ -362,7 +362,7 @@ pout setup (mk, mc) ga p@(Prove g m s ps (h, b)) = case s of
     _ | null ps -> ""  -- rly?
     _ ->
       " where\n" ++ replicate (hdent + 2) ' ' ++
-      fmat k (ps >>= sub k) ""
+      fmat k (ps >>= sub k) (rfold lout b "")
       where k = Dental (hdent + 2)
   fmat :: WhereKind -> [String] -> String -> String
   fmat (Dental d) [] = id
