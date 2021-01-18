@@ -94,6 +94,7 @@ data Gripe
   = Surplus
   | Scope String
   | ByBadRule
+  | NotGiven
   | ByAmbiguous
   | Mardiness
   deriving (Show, Eq)
@@ -101,10 +102,21 @@ data Gripe
 passive :: Prove () Appl -> Prove Status TmR
 passive (Prove g m () ps src) =
   Prove (Your g) (fmap Your m) Keep (map subPassive ps) src
+  
 subPassive :: SubProve () Appl -> SubProve Status TmR
 subPassive ((srg, gs) ::- p) = (srg, map (fmap Your) gs) ::- passive p
 subPassive (SubPGap ls)  = SubPGap ls
 subPassive (SubPGuff ls) = SubPGuff ls
+
+surplus :: Prove () Appl -> Prove Status TmR
+surplus (Prove g m () ps src) =
+  Prove (Your g) (fmap Your m) (Junk Surplus) (map subPassive ps) src
+  
+subSurplus :: SubProve () Appl -> SubProve Status TmR
+subSurplus ((srg, gs) ::- p) = (srg, map (fmap Your) gs) ::- surplus p
+subSurplus (SubPGap ls)  = SubPGap ls
+subSurplus (SubPGuff ls) = SubPGuff ls
+
 
 -- this type is highly provisional
 chkProof
@@ -138,9 +150,13 @@ chkProof setup ga g m ps src = case my g of
         (map subPassive ps) src
       Right h@(Our ht _) -> Prove g (From h) Keep
         (chkSubProofs setup ga (fromSubs setup ga gt ht) ps) src
+    MGiven -> if gives ga (Given g)
+      then Prove g MGiven Keep (map subSurplus ps) src
+      else Prove g MGiven (Junk NotGiven) (map subPassive ps) src
   Nothing -> Prove g (fmap Your m) (Junk Mardiness)
     (map subPassive ps) src
 
+ 
 -- checking subproofs amounts to validating them,
 -- then checking which subgoals are covered,
 -- generating stubs for those which are not,

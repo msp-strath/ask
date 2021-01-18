@@ -108,6 +108,7 @@ pProve ft = do
     =   Stub <$ the Sym "?"
     <|> By   <$ the Key "by"   <* spc <*> pAppl ft
     <|> From <$ the Key "from" <* spc <*> pAppl ft
+    <|> MGiven <$ the Key "given"
   pSubs = lolSpc "where" pSub <|> pure []
   pSub = ((::-) <$> ext pGivens <*> pProve ft <* spc <* eol <|> (SubPGap . fst) <$> ext (spc <* eol)) ?>
     ((SubPGuff . fst) <$> ext (many (eat Just) <* eol))
@@ -119,6 +120,7 @@ data Method t
   = Stub
   | By t
   | From t
+  | MGiven
   deriving (Show, Functor)
 
 data Given t
