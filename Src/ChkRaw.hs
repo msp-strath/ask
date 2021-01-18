@@ -59,7 +59,10 @@ myIntroRules =
   , (PC "->" [PM "a" mempty, PM "b" mempty], PC "ImpI" []) :<=
     [ TC "given" [TM "a" [], TC "prove" [TM "b" []]]
     ]
-  , (PC "True" [], PC "True" []) :<= []
+  , (PC "Not" [PM "a" mempty], PC "NotI" []) :<=
+    [ TC "given" [TM "a" [], TC "prove" [TC "False" []]]
+    ]
+  , (PC "True" [], PC "TrueI" []) :<= []
   ]
 
 myWeirdRules :: [Rule]
@@ -208,7 +211,8 @@ subgoal _ = Nothing
 
 gives :: Context -> Given TmR -> Bool
 gives ga (Given h) = case my h of
-  Just h -> any (Hyp h ==) ga
+  Just h -> h == TC "True" [] ||
+            any ((||) <$> (Hyp h ==) <*> (Hyp (TC "False" []) ==)) ga
   Nothing -> False
 
 validSubProof
@@ -355,6 +359,7 @@ ppEl setup ga spot (t ::: ty) = pppa spot Rad
 ppEl setup ga spot (f :$ s) = pppa spot App
   (ppEl setup ga RadSpot f ++ " :: " ++ ppTm setup ga Arg s)
 
+-- whitespace management is subtle here
 pout :: Setup -> (Maybe WhereKind, Maybe Int) -> Context -> Prove Status TmR -> String
 pout setup (mk, mc) ga p@(Prove g m s ps (h, b)) = case s of
   Keep -> rfold lout h "" ++ psout b ps
