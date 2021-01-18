@@ -356,9 +356,10 @@ pout setup (mk, mc) ga p@(Prove g m s ps (h, b)) = case s of
   psout :: [LexL] -> [SubProve Status TmR] -> String
   psout b ps = case span gappy b of
     (g, (T ((_,"where",gap) :-! m),_,_): ls) ->
-      rfold lout g . ("where" ++) . rfold lout gap $ case whereKind hdent m of
-        k@(Dental d) -> fmat k (ps >>= sub k) (rfold lout ls "")
-        k@(Bracy pre semi post) -> "{" ++ rfold lout pre (fmat k (ps >>= sub k) (rfold lout ls ""))
+      rfold lout g . ("where\n" ++) . (replicate (hdent + 2) ' ' ++) $ (case whereKind hdent m of
+        k@(Dental d) -> fmat k (ps >>= sub k)
+        k@(Bracy pre semi post) -> ("{" ++) . rfold lout pre . fmat k (ps >>= sub k)
+      )  (rfold lout gap . rfold lout ls $ "")
     _ | null ps -> rfold lout b ""
     _ ->
       " where\n" ++ replicate (hdent + 2) ' ' ++
