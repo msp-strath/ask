@@ -68,7 +68,7 @@ myIntroRules =
 myWeirdRules :: [Rule]
 myWeirdRules =
   [ (PM "x" mempty, PC "Contradiction" []) :<=
-    [ TC "given" [TC "->" [TM "x" [], TC "False" []],
+    [ TC "given" [TC "Not" [TM "x" []],
       TC "prove" [TC "False" []]]
     ]
   ]
@@ -320,6 +320,7 @@ pppa x y s = if paren x y then "(" ++ s ++ ")" else s where
       (Left LAsso, LAsso) -> False
       (Right RAsso, RAsso) -> False
       _ -> True)
+  paren (Infix _) App = False
   paren _ _ = True
 
 readyTmR :: TmR -> Either Tm [LexL]
