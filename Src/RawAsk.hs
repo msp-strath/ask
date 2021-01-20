@@ -4,9 +4,9 @@
 
 module Ask.Src.RawAsk where
 
-import Ask.Src.Bwd
-import Ask.Src.LexAsk
-import Ask.Src.ParTok
+import Ask.Src.OddEven
+import Ask.Src.Lexing
+import Ask.Src.Parsing
 
 import qualified Data.Map as M
 import Control.Applicative
@@ -17,12 +17,12 @@ data RawDecl
   | RawModule String
   | RawSewage
   | RawFixity FixityTable
-  | RawProp Appl [RawIntro]
+  | RawProp Appl (Bloc RawIntro)
   | RawProof (Prove () Appl)
   deriving Show
 
-raw :: FixityTable -> String -> [(RawDecl, [LexL])]
-raw fi input = map (grok (fi <> ft)) ls where
+raw :: FixityTable -> String -> Bloc (RawDecl, [LexL])
+raw fi input = fmap (grok (fi <> ft)) ls where
   ls = lexAll input
   ft = getFixities ls
   grok ft l = case parTok (pDecl ft) l of
@@ -40,7 +40,7 @@ pDecl ft = good <* eol where
   agree at = at <$ guard (all id $ M.intersectionWith (==) at ft)
   prop = do
     r@(_, h :$$ _) <- spd (pAppl ft)
-    is <- lol "where" (pIntro h) <|> [] <$ spc
+    is <- lol "where" (pIntro h) <|> ([] :-/ Stop) <$ spc
     return (r, is)
   pIntro h = do
     the Key "prove"
@@ -49,10 +49,10 @@ pDecl ft = good <* eol where
     the Key "by"
     r <- spd (pAppl ft)
     ps <- lol "where"
-             (spd ((,) <$> (id <$ the Key "given" <*> sep (pAppl ft) (the Sym ",")
+             (spd ((,) <$> (id <$ the Key "given" <* spc <*> sep (pAppl ft) (spd (the Sym ","))
                            <|> [] <$ spc) <*
                    the Key "prove" <*> spd (pAppl ft)))
-          <|> [] <$ spc
+          <|> ([] :-/ Stop) <$ spc
     return $ RawIntro
       { introPats = xs, rulePat = r, rulePrems = ps }
 
@@ -60,7 +60,7 @@ data RawIntro
   = RawIntro
   { introPats :: [Appl]
   , rulePat   :: Appl
-  , rulePrems :: [([Appl], Appl)]
+  , rulePrems :: Bloc ([Appl], Appl)
   } deriving Show
 
 data Prove a t
@@ -68,7 +68,7 @@ data Prove a t
   { goal       :: t
   , method     :: Method t
   , annotation :: a
-  , subproofs  :: [SubProve a t]
+  , subproofs  :: Bloc (SubProve a t)
   , source     :: ([LexL], [LexL])
   } deriving (Functor)
 
@@ -82,19 +82,17 @@ instance (Show a, Show t) => Show (Prove a t) where
 
 data SubProve a t
   = ([LexL], [Given t]) ::- Prove a t
-  | SubPGap [LexL]
   | SubPGuff [LexL]
   deriving (Functor)
 
 instance (Show a, Show t) => Show (SubProve a t) where
   show ((_, gs) ::- p) = show gs ++ " |- " ++ show p
-  show (SubPGap ls) = "SubPGap " ++ show ls
   show (SubPGuff ls) = "SubPGuff " ++ show ls
 
 pProve :: FixityTable -> ParTok (Prove () Appl)
 pProve ft = do
   (top, (go, me)) <- ext $
-    (,) <$ the Key "prove" <* spc <*> pAppl ft <* spc <*> pMethod
+    (,) <$ (the Key "prove" <|> the Key "proven") <* spc <*> pAppl ft <* spc <*> pMethod
   (body, ps) <- ext (id <$ spc <*> pSubs)
   return $ Prove
     { goal       = go
@@ -109,11 +107,11 @@ pProve ft = do
     <|> By   <$ the Key "by"   <* spc <*> pAppl ft
     <|> From <$ the Key "from" <* spc <*> pAppl ft
     <|> MGiven <$ the Key "given"
-  pSubs = lolSpc "where" pSub <|> pure []
-  pSub = ((::-) <$> ext pGivens <*> pProve ft <* spc <* eol <|> (SubPGap . fst) <$> ext (spc <* eol)) ?>
-    ((SubPGuff . fst) <$> ext (many (eat Just) <* eol))
+  pSubs = lol "where" pSub <|> pure ([] :-/ Stop)
+  pSub = ((::-) <$> ext (pGivens <* spc) <*> pProve ft <* spc <* eol)
+      ?> ((SubPGuff . fst) <$> ext (many (eat Just) <* eol))
   pGivens
-    =   id <$ the Key "given" <*> sep (Given <$> pAppl ft) (the Sym ",")
+    =   id <$ the Key "given" <* spc <*> sep (Given <$> pAppl ft) (spd (the Sym ","))
     <|> pure []
 
 data Method t
@@ -130,7 +128,7 @@ data Given t
 data Assocy = LAsso | NAsso | RAsso deriving (Show, Eq)
 type FixityTable = M.Map String (Int, Assocy)
 
-getFixities :: [[LexL]] -> FixityTable
+getFixities :: Bloc [LexL] -> FixityTable
 getFixities = foldMap (glom . parTok fixity) where
   glom [(_,t,_)] = t
   glom _ = M.empty
