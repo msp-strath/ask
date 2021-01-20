@@ -396,7 +396,7 @@ pout setup k ga p@(Prove g m (s, n) ps (h, b)) = case s of
 -}
 
 filth :: String -> String
-filth s = foldMap yuk (raw (fixities mySetup) s) where
+filth s = bifoldMap (($ "") . rfold lout) yuk (raw (fixities mySetup) s) where
   yuk (RawProof (Prove gr mr () ps src), _) =
     bifoldMap id (($ "") . rfold lout)
     . pout mySetup ga (Denty 1)
