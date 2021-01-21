@@ -23,3 +23,6 @@ prop False
 prop True where
   prove True by True
 
+prop Not p where
+  prove Not p by NotI where
+    given p prove False
