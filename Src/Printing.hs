@@ -1,3 +1,5 @@
+{-# LANGUAGE LambdaCase #-}
+
 module Ask.Src.Printing where
 
 import Data.Char
@@ -22,12 +24,17 @@ instance Ord Wot where
   compare App _   = GT
   -- x <= y means you can put a y anywhere you can put an x with no parens
 
-pnom :: Int -> AM String
-pnom i = AM $ \ _ ga -> Right (go ga i) where
-  go B0 i = "???" ++ show i
-  go (ga :< Var x) 0 = x
-  go (ga :< Var _) i = go ga (i - 1)
-  go (ga :< _) i     = go ga i
+pinx :: Int -> AM String
+pinx i = go i <$> gamma where
+  go i B0 = "???" ++ show i
+  go 0 (ga :< Var x) = x
+  go i (ga :< Var _) = go (i - 1) ga
+  go i (ga :< _)     = go i       ga
+
+pnom :: Nom -> AM String
+pnom x = cope (nomBKind x) (\ gr -> return (show x)) $ \case
+  User x -> return x
+  _      -> return (show x)
 
 pppa :: Spot -> Wot -> String -> String
 pppa x y s = if paren x y then "(" ++ s ++ ")" else s where
@@ -72,7 +79,8 @@ ppTm spot (TE e) = ppEl spot e
 ppTm _ t = return $ show t
 
 ppEl :: Spot -> Syn -> AM String
-ppEl _ (TV i) = pnom i
+ppEl _ (TV i) = pinx i
+ppEl _ (TP (x, _)) = pnom x
 ppEl spot (t ::: ty) = do
   t <- ppTm RadSpot t
   ty <- ppTm RadSpot ty

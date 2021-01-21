@@ -1,4 +1,4 @@
-{-# LANGUAGE CPP, TupleSections #-}
+{-# LANGUAGE CPP, TupleSections, LambdaCase #-}
 module Ask.Src.Scoping where
 
 import Data.List
@@ -9,6 +9,7 @@ import qualified Data.Map as M
 
 import Ask.Src.Bwd
 import Ask.Src.Thin
+import Ask.Src.Hide
 import Ask.Src.HalfZip
 import Ask.Src.Lexing
 import Ask.Src.RawAsk
@@ -27,16 +28,23 @@ data Gripe
   | FAIL
   deriving (Show, Eq)
 
+type Root = (Bwd (String, Int), Int)
+
 data AM x = AM {runAM
-  :: Setup    -- rules and stuff
-  -> Context  -- vars and hyps
-  -> Either Gripe x}
+  :: Setup     -- rules and stuff
+  -> AskState  -- vars and hyps
+  -> Either Gripe (x, AskState)}
+
+data AskState = AskState
+  { context :: Context
+  , root    :: Root
+  } deriving Show
 
 instance Monad AM where
-  return x    = AM $ \ _ _ -> Right x
-  AM f >>= k = AM $ \ setup ga -> case f setup ga of
+  return x    = AM $ \ _ as -> Right (x, as)
+  AM f >>= k = AM $ \ setup as -> case f setup as of
     Left g -> Left g
-    Right x -> runAM (k x) setup ga
+    Right (x, as) -> runAM (k x) setup as
 #if !(MIN_VERSION_base(4,13,0))
   -- Monad(fail) will be removed in GHC 8.8+
   fail = Fail.fail
@@ -56,9 +64,9 @@ mayhem mx = do
   return x
 
 cope :: AM x -> (Gripe -> AM y) -> (x -> AM y) -> AM y
-cope (AM f) yuk wow = AM $ \ setup ga -> case f setup ga of
-  Left g  -> runAM (yuk g) setup ga
-  Right x -> runAM (wow x) setup ga
+cope (AM f) yuk wow = AM $ \ setup as -> case f setup as of
+  Left g        -> runAM (yuk g) setup as
+  Right (x, as) -> runAM (wow x) setup as
 
 instance Alternative AM where
   empty = gripe FAIL
@@ -71,7 +79,7 @@ data Setup = Setup
   } deriving Show
 
 fixity :: String -> AM (Int, Assocy)
-fixity o = AM $ \ s _ -> Right $ case M.lookup o (fixities s) of
+fixity o = AM $ \ s as -> Right . (, as) $ case M.lookup o (fixities s) of
   Nothing -> (9, LAsso)
   Just x  -> x
 
@@ -103,7 +111,7 @@ data Rule =
 
 by :: Tm -> Tm -> AM [Tm]
 by goal invok = do
-  byrs <- AM $ \ s _ -> Right (introRules s ++ weirdRules s)
+  byrs <- AM $ \ s as -> Right (introRules s ++ weirdRules s, as)
   subses <- concat <$> traverse backchain byrs
   case subses of
     [subs] -> return subs
@@ -118,7 +126,7 @@ by goal invok = do
 
 invert :: Tm -> AM [(Pat, [Tm])]
 invert hyp = do
-  intros <- AM $ \ s _ -> Right (introRules s)
+  intros <- AM $ \ s as -> Right (introRules s, as)
   concat <$> traverse try intros
  where
   try :: Rule -> AM [(Pat, [Tm])]
@@ -128,38 +136,79 @@ invert hyp = do
 
 type Context = Bwd CxE
 
-what's :: String -> AM Syn
-what's x = AM $ \ setup ga -> TV <$> go 0 ga where
-  go i B0 = Left (Scope x)
-  go i (ga :< Var y) = if x == y then Right 0 else (1 +) <$> go i ga
-  go i (ga :< _)     = go i ga
-
 data CxE -- what sort of thing is in the context?
   = Hyp Tm
   | Var String  -- dear god no, fix this to be locally nameless
+  | Bind (Nom, Hide Tm) BKind
+  | ImplicitQuantifier
+  deriving (Show, Eq) -- get rid of that Eq!
+
+data BKind
+  = User String
+  | Defn Tm
+  | Hole
   deriving (Show, Eq)
 
+gamma :: AM Context
+gamma = AM $ \ setup as -> Right (context as, as)
+
+setGamma :: Context -> AM ()
+setGamma ga = AM $ \ setup as -> Right ((), as {context = ga})
+
+fresh :: String -> AM Nom
+fresh x = AM $ \ setup as -> case root as of
+  (roo, non) -> Right (roo <>> [(x, non)], as {root = (roo, non + 1)})
+
+push :: CxE -> AM ()
+push z = AM $ \ setup as -> Right ((), as {context = context as :< z})
+
+pop :: (CxE -> Bool) -> AM (Maybe CxE)
+pop test = do
+  ga <- gamma
+  case go ga of
+    Nothing      -> return Nothing
+    Just (ga, z) -> setGamma ga >> return (Just z)
+ where
+  go B0 = Nothing
+  go (ga :< z)
+    | test z    = Just (ga, z)
+    | otherwise = go ga >>= \ (ga, y) -> Just (ga :< z, y)
+
+what's :: String -> AM Syn
+what's x = do
+  ga <- gamma
+  (e, mga) <- go ga
+  case mga of
+    Nothing -> return ()
+    Just ga -> setGamma ga
+  return e
+ where
+  go :: Context -> AM (Syn, Maybe Context)
+  go B0 = gripe (Scope x)
+  go (_ :< Bind p (User y)) | x == y = return (TP p, Nothing)
+  go ga@(_ :< ImplicitQuantifier) = do
+    xTp <- (, Hide (TC "Type" [])) <$> fresh "Ty"
+    xp  <- (, Hide (TE (TP xTp)))  <$> fresh x
+    return (TP xp, Just (ga :< Bind xTp Hole :< Bind xp (User x)))
+  go (ga :< z) = do
+    (e, mga) <- go ga
+    return (e, (:< z) <$> mga)
+
 given :: Tm -> AM ()
-given goal = AM (\ _ ga -> Right ga) >>= go where
+given goal = gamma >>= go where
   go B0 = gripe NotGiven
   go (ga :< Hyp hyp) = cope (equal (TC "Prop" []) (hyp, goal))
     (\ gr -> go ga) return
   go (ga :< _) = go ga
 
-(|-) :: CxE -> AM x -> AM x
-e |- p = AM $ \ setup ga -> runAM p setup (ga :< e)
-
-applScoTm :: Appl -> (Context, TmR)
-applScoTm a@(_, x) = (ga, Our t a) where
-  (xs, t) = go x
-  ga = B0 <>< map Var (nub xs)
-  ge x (ga :< Var y) = if x == y then 0 else 1 + ge x ga
-  ge x (ga :< _)     = ge x ga
-  go ((t, _, y) :$$ ras) = case t of
-      Lid -> (y : ys, TE (foldl (:$) (TV (ge y ga)) ts))
-      _   -> (ys, TC y ts)
-    where
-    (ys, ts) = traverse (go . snd) ras
+(|-) :: Tm -> AM x -> AM x
+h |- p = do
+  push (Hyp h)
+  x <- p
+  pop $ \case
+    Hyp _ -> True
+    _ -> False
+  return x
 
 scoApplTm :: Appl -> AM TmR
 scoApplTm a@(_, t) = ((`Our` a)) <$> go t
@@ -169,3 +218,17 @@ scoApplTm a@(_, t) = ((`Our` a)) <$> go t
       Lid -> TE <$> (foldl (:$) <$> what's y <*> as)
       _   -> TC y <$> as
       where as = traverse (go . snd) ras
+
+applScoTm :: Appl -> AM TmR
+applScoTm a = do
+  push ImplicitQuantifier
+  t <- scoApplTm a
+  pop $ \case
+    ImplicitQuantifier -> True
+    _ -> False
+  return t
+
+nomBKind :: Nom -> AM BKind
+nomBKind x = gamma >>= foldl me empty where
+  me no (Bind (y, _) bk) | x == y = return bk
+  me no _ = no

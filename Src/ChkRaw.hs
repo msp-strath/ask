@@ -148,7 +148,7 @@ chkSubProofs ss ps = do
   glom end = foldr (\ x xs -> [] :-/ x :-\ xs) end
 
 subgoal :: Tm -> (Tm -> AM x) -> AM x
-subgoal (TC "given" [h, g]) k = Hyp h |- subgoal g k
+subgoal (TC "given" [h, g]) k = h |- subgoal g k
 subgoal (TC "prove" [g]) k = k g
 subgoal _ _ = gripe BadSubgoal
 
@@ -161,7 +161,7 @@ validSubProof ((srg, Given h : gs) ::- p@(Prove sg sm () sps src)) =
       Prove (Your sg) (fmap Your sm) (Junk gr, True)
         (fmap subPassive sps) src)
     $ \ h@(Our ht _) -> do
-      (srg, gs) ::- p <- Hyp ht |- validSubProof ((srg, gs) ::- p)
+      (srg, gs) ::- p <- ht |- validSubProof ((srg, gs) ::- p)
       return $ (srg, Given h : gs) ::- p
 validSubProof ((srg, []) ::- Prove sg sm () sps src) =
   cope (scoApplTm sg)
@@ -187,7 +187,7 @@ fromSubs g f = map snd {- ignorant -} <$> invert f >>= \case
   wangle (TC "prove" [p]) = p
   wangle _ = TC "True" []
 
-
+{-
 testChkProof :: String -> [Prove Anno TmR]
 testChkProof = foldMap (bof . fst) . raw (fixities mySetup) where
   bof (RawProof (Prove gr mr () ps src)) = case runAM (chkProof g mr ps src) mySetup ga of
@@ -196,6 +196,7 @@ testChkProof = foldMap (bof . fst) . raw (fixities mySetup) where
    where
     (ga, g) = applScoTm gr
   bof _ = []
+-}
 
 pout :: LayKind -> Prove Anno TmR -> AM (Odd String [LexL])
 pout k p@(Prove g m (s, n) ps (h, b)) = let k' = scavenge b in case s of
@@ -241,7 +242,7 @@ pout k p@(Prove g m (s, n) ps (h, b)) = let k' = scavenge b in case s of
      fish [] p = p
      fish (Given h : gs) p = case my h of
        Nothing -> fish gs p
-       Just h -> Hyp h |- fish gs p
+       Just h -> h |- fish gs p
      givs :: [Given TmR] -> AM (String -> String)
      givs gs = traverse wallop gs >>= \case
        [] -> return id
@@ -319,13 +320,19 @@ pout k p@(Prove g m (s, n) ps (h, b)) = let k' = scavenge b in case s of
 
 filth :: String -> String
 filth s = bifoldMap (($ "") . rfold lout) yuk (raw (fixities mySetup) s) where
-  yuk (RawProof (Prove gr mr () ps src), ls) = case runAM go mySetup ga of
+  yuk (RawProof (Prove gr mr () ps src), ls) = case runAM go mySetup init of
     Left e -> "{- " ++ show e ++ "\n" ++ rfold lout ls "\n-}"  -- shouldn't happen
-    Right s -> s
+    Right (s, _) -> s
    where
-    (ga, g) = applScoTm gr
     go :: AM String
-    go = bifoldMap id (($ "") . rfold lout) <$> 
+    go = do
+      g <- applScoTm gr
+      bifoldMap id (($ "") . rfold lout) <$> 
            (chkProof g mr ps src >>= pout (Denty 1))
   yuk (RawSewage, ls) = "{- don't ask\n" ++ rfold lout ls "\n-}"
   yuk (_, ls) = rfold lout ls ""
+  init :: AskState
+  init = AskState
+    { context = B0
+    , root    = (B0, 0)
+    }

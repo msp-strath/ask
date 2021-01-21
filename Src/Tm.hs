@@ -12,7 +12,9 @@ import Control.Applicative
 
 import Ask.Src.Thin
 import Ask.Src.HalfZip
+import Ask.Src.Hide
 
+type Nom = [(String, Int)]
 type Con = String
 
 data Pat
@@ -56,7 +58,8 @@ instance Thin s => Thin (Chk s) where
   thicken th (TE s)    = TE <$> thicken th s
   
 data Syn
-  = TV Int
+  = TV Int         -- de Bruijn index
+  | TP (Nom, Hide Tm)   -- named var, with cached type
   | Tm ::: Tm
   | Syn :$ Tm
   deriving (Show, Eq)
@@ -65,9 +68,11 @@ instance Thin Syn where
   TV i <^> th = TV (i <^> th)
   (t ::: _T) <^> th = (t <^> th) ::: (_T <^> th)
   (e :$ s) <^> th = (e <^> th) :$ (s <^> th)
+  TP x <^> th = TP x
   thicken th (TV i) = TV <$> thicken th i
   thicken th (t ::: _T) = (:::) <$> thicken th t <*> thicken th _T
   thicken th (e :$ s) = (:$) <$> thicken th e <*> thicken th s
+  thicken th (TP x) = pure (TP x)
 
 match :: Thin s   -- s is almost always Syn, but parametricity matters
       => Thinning -- what thinning maps bound vars in tm to bound vars in pat?
@@ -101,15 +106,16 @@ instance Stan s => Stan [s] where
   sbst u es = fmap (sbst u es)
 
 instance Stan Syn where
-  stan _ (TV i) = TV i
   stan ms (t ::: _T) = stan ms t ::: stan ms _T
   stan ms (e :$ s) = stan ms e :$ stan ms s
+  stan ms e = e
   sbst u es (TV i) = sg !! i where
     sg = [TV i | i <- [0 .. (u - 1)]]
          ++ (es <^> Th (shiftL (-1) u)) ++
          [TV i | i <- [u ..]]
   sbst u es (t ::: _T) = sbst u es t ::: sbst u es _T
   sbst u es (e :$ s) = sbst u es e :$ sbst u es s
+  sbst u es e = e
 
 instance Stan Tm where
   stan ms (TM m es) = case lookup m ms of
