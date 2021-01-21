@@ -34,7 +34,7 @@ pDecl ft = good <* eol where
   good = RawHeeHaw <$ spc
      <|> RawModule <$ the Key "module" <*> spd (txt <$> kinda Uid)
            <* lol "where" (pure ())
-     <|> RawFixity <$> (fixity >>= agree)
+     <|> RawFixity <$> (mkFixity >>= agree)
      <|> uncurry RawProp <$ the Key "prop" <*> prop
      <|> RawProof <$> (pProve ft)
   agree at = at <$ guard (all id $ M.intersectionWith (==) at ft)
@@ -129,12 +129,12 @@ data Assocy = LAsso | NAsso | RAsso deriving (Show, Eq)
 type FixityTable = M.Map String (Int, Assocy)
 
 getFixities :: Bloc [LexL] -> FixityTable
-getFixities = foldMap (glom . parTok fixity) where
+getFixities = foldMap (glom . parTok mkFixity) where
   glom [(_,t,_)] = t
   glom _ = M.empty
 
-fixity :: ParTok FixityTable
-fixity = actual ?> pure M.empty where
+mkFixity :: ParTok FixityTable
+mkFixity = actual ?> pure M.empty where
   actual = mkTable <$>
     (LAsso <$ the Key "infixl"
      <|> NAsso <$ the Key "infix"

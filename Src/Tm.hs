@@ -112,9 +112,11 @@ instance Stan Syn where
   sbst u es (e :$ s) = sbst u es e :$ sbst u es s
 
 instance Stan Tm where
-  stan ms (TM m es) = sbst 0 es' t where
+  stan ms (TM m es) = case lookup m ms of
+    Just t  -> sbst 0 es' t
+    Nothing -> TM m es'
+   where
     es' = map (stan ms) es
-    Just t = lookup m ms
   stan ms (TC c ts) = TC c (stan ms ts)
   stan ms (TB b)    = TB (stan ms b)
   stan ms (TE e)    = upTE (stan ms e)

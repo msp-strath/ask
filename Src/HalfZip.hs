@@ -7,3 +7,6 @@ instance HalfZippable [] where
   halfZipWith f [] [] = Just []
   halfZipWith f (x : xs) (y : ys) = (:) <$> f x y <*> halfZipWith f xs ys
   halfZipWith _ _ _ = Nothing
+
+halfZip :: HalfZippable f => f x -> f y -> Maybe (f (x, y))
+halfZip = halfZipWith $ \ x y -> Just (x, y)

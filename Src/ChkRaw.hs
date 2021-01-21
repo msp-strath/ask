@@ -1,3 +1,5 @@
+{-# LANGUAGE TupleSections, LambdaCase #-}
+
 module Ask.Src.ChkRaw where
 
 import Data.List
@@ -5,6 +7,7 @@ import Data.Char
 import qualified Data.Map as M
 import Control.Arrow ((***))
 import Data.Bifoldable
+import Control.Applicative
 
 import Debug.Trace
 
@@ -32,15 +35,6 @@ data Status
   | Need
   deriving (Show, Eq)
 
-data Gripe
-  = Surplus
-  | Scope String
-  | ByBadRule
-  | NotGiven
-  | ByAmbiguous
-  | Mardiness
-  deriving (Show, Eq)
-
 passive :: Prove () Appl -> Prove Anno TmR
 passive (Prove g m () ps src) =
   Prove (Your g) (fmap Your m) (Keep, False) (fmap subPassive ps) src
@@ -59,44 +53,33 @@ subSurplus (SubPGuff ls) = SubPGuff ls
 
 -- this type is highly provisional
 chkProof
-  :: Setup       -- a big record of gubbins
-  -> Context     -- what do we know?
-  -> TmR         -- the goal
+  :: TmR         -- the goal
   -> Method Appl -- the method
   -> Bloc (SubProve () Appl)  -- the subproofs
   -> ([LexL], [LexL])  -- source tokens (head, body)
-  -> Prove Anno TmR  -- the reconstructed proof
+  -> AM (Prove Anno TmR)  -- the reconstructed proof
 
-chkProof setup ga g m ps src = case my g of
-  Just gt -> case m of
-    Stub -> Prove g Stub (Keep, False)
-      (fmap subPassive ps) src
-    By r -> case scoApplTm ga r of
-      Left x -> Prove g (By (Your r)) (Junk (Scope x), True)
-        (fmap subPassive ps) src
-      Right r@(Our rt _) -> case
-        [ stan (mgh ++ mmn) ss
-        | ((h, n) :<= ss) <- byRules setup
-        , mgh <- mayl $ match mempty h gt
-        , mmn <- mayl $ match mempty n rt
-        ] of
-        [ss] ->
-          let ns = chkSubProofs setup ga ss ps
-          in  Prove g (By r) (Keep, all happy ns) ns src
-        sss -> Prove g (By r)
-          (Junk (if null sss then ByBadRule else ByAmbiguous), True)
-          (fmap subPassive ps) src
-    From h -> case scoApplTm ga h of
-      Left x -> Prove g (From (Your h)) (Junk (Scope x), True)
-        (fmap subPassive ps) src
-      Right h@(Our ht _) -> 
-        let ns = chkSubProofs setup ga (fromSubs setup ga gt ht) ps
-        in  Prove g (From h) (Keep, all happy ns) ns src
-    MGiven -> if gives ga (Given g)
-      then Prove g MGiven (Keep, True) (fmap subSurplus ps) src
-      else Prove g MGiven (Junk NotGiven, True) (fmap subPassive ps) src
-  Nothing -> Prove g (fmap Your m) (Junk Mardiness, True)
+chkProof g m ps src = cope go junk return where
+  junk gr = return $ Prove g (fmap Your m) (Junk gr, True)
     (fmap subPassive ps) src
+  go = case my g of
+    Just gt -> do
+      (m, ss) <- case m of
+        Stub -> return $ (Stub, [])
+        By r -> do
+          r@(Our rt _) <- scoApplTm r
+          (By r,) <$> (gt `by` rt)
+        From h -> do
+          h@(Our ht _) <- scoApplTm h
+          (From h,) <$> fromSubs gt ht
+        MGiven -> do
+          given gt
+          return (MGiven, [])
+      ns <- chkSubProofs ss ps
+      let proven = case m of {Stub -> False; _ -> all happy ns}
+      return $ Prove g m (Keep, proven) ns src
+    Nothing -> return $ Prove g (fmap Your m) (Junk Mardiness, True)
+      (fmap subPassive ps) src
 
 happy :: SubProve Anno TmR -> Bool
 happy (_ ::- Prove _ _ (_, b) _ _) = b
@@ -108,40 +91,52 @@ happy _ = True
 -- and marking as surplus those subproofs which do
 -- not form part of the cover
 chkSubProofs
-  :: Setup
-  -> Context                    -- what do we know?
-  -> [Tm]                       -- subgoals expected from rule
-  -> Bloc (SubProve () Appl)    -- subproofs coming from user
-  -> Bloc (SubProve Anno TmR)   -- reconstruction
-chkSubProofs setup ga ss ps = glom (fmap squish qs) (extra us) where
-  (qs, us) = cover ss $ fmap ((,) False . validSubProof setup ga) ps
-  cover [] qs = (qs, [])
-  cover (t : ts) qs = case cover1 t qs of
-    Nothing -> case cover ts qs of
-      (qs, ts) -> (qs, t : ts)
-    Just qs -> cover ts qs
+  :: [Tm]                            -- subgoals expected from rule
+  -> Bloc (SubProve () Appl)         -- subproofs coming from user
+  -> AM (Bloc (SubProve Anno TmR))   -- reconstruction
+chkSubProofs ss ps = do
+  ps <- traverse validSubProof ps
+  (qs, us) <- cover ss (fmap (False,) ps)
+  vs <- extra us
+  return $ glom (fmap squish qs) vs
+ where
+  cover
+    :: [Tm]  -- subgoals to cover
+    -> Bloc (Bool, SubProve Anno TmR)  -- (used yet?, subproof)
+    -> AM (Bloc (Bool, SubProve Anno TmR)  -- ditto
+          , [Tm]                          -- undischarged subgoals
+          )
+  cover [] qs = return (qs, [])
+  cover (t : ts) qs = cope (cover1 t qs)
+    (\ _ -> cover ts qs >>= \ (qs, ts) -> return (qs, t : ts))
+    $ cover ts
   cover1 :: Tm -> Bloc (Bool, SubProve Anno TmR)
-               -> Maybe (Bloc (Bool, SubProve Anno TmR))
-  cover1 t (_ :-/ Stop) = Nothing
-  cover1 t (g :-/ (b, p) :-\ qs)
-    | covers t p = Just (g :-/ (True, p) :-\ qs)
-    | otherwise  = (g :-/) <$> (((b, p) :-\) <$> cover1 t qs)
-  covers :: Tm -> SubProve Anno TmR -> Bool
-  covers t ((_, hs) ::- Prove g m (Keep, _) _ _) = case (subgoal (ga, t), my g) of
-    (Just (ga, p), Just g) -> all (ga `gives`) hs && (g == p)
-    _ -> False
-  covers t _ = False
+         -> AM (Bloc (Bool, SubProve Anno TmR))
+  cover1 t (_ :-/ Stop) = gripe FAIL
+  cover1 t (g :-/ (b, p) :-\ qs) = cope (covers t p)
+    (\ _ -> ((g :-/) . ((b, p) :-\ )) <$> cover1 t qs)
+    $ \ _ -> return $ (g :-/ (True, p) :-\ qs)
+  covers :: Tm -> SubProve Anno TmR -> AM ()
+  covers t ((_, hs) ::- Prove g m (Keep, _) _ _) = subgoal t $ \ t -> do
+    g <- mayhem $ my g
+    traverse ensure hs
+    equal (TC "Prop" []) (g, t)
+   where
+    ensure (Given h) = mayhem (my h) >>= given
+  covers t _ = gripe FAIL
   squish :: (Bool, SubProve Anno TmR) -> SubProve Anno TmR
   squish (False, gs ::- Prove g m (Keep, _) ss src) =
     gs ::- Prove g m (Junk Surplus, True) ss src
   squish (_, q) = q
-  extra :: [Tm] -> [SubProve Anno TmR]
-  extra [] = []
-  extra (u : us) = case subgoal (ga, u) of
-    Nothing -> extra us
-    Just (ga, g)
-      | gives ga (Given (My g)) -> extra us
-      | otherwise -> need u : extra us
+  extra :: [Tm] -> AM [SubProve Anno TmR]
+  extra [] = return []
+  extra (u : us) = cope (subgoal u obvious)
+    (\ _ -> (need u :) <$> extra us)
+    $ \ _ -> extra us
+  obvious s
+    =   given s
+    <|> given (TC "False" [])
+    <|> equal (TC "Prop" []) (s, TC "True" [])
   need (TC "prove" [g]) =
     ([], []) ::- Prove (My g) Stub (Need, False)
       ([] :-/ Stop) ([], [])
@@ -152,49 +147,37 @@ chkSubProofs setup ga ss ps = glom (fmap squish qs) (extra us) where
   glom (g :-/ p :-\ gps) = (g :-/) . (p :-\) . glom gps
   glom end = foldr (\ x xs -> [] :-/ x :-\ xs) end
 
-subgoal :: (Context, Tm) -> Maybe (Context, Tm)
-subgoal (ga, TC "given" [h, g]) = subgoal (ga :< Hyp h, g)
-subgoal (ga, TC "prove" [g]) = Just (ga, g)
-subgoal _ = Nothing
-
-gives :: Context -> Given TmR -> Bool
-gives ga (Given h) = case my h of
-  Just h -> h == TC "True" [] ||
-            any ((||) <$> (Hyp h ==) <*> (Hyp (TC "False" []) ==)) ga
-  Nothing -> False
+subgoal :: Tm -> (Tm -> AM x) -> AM x
+subgoal (TC "given" [h, g]) k = Hyp h |- subgoal g k
+subgoal (TC "prove" [g]) k = k g
+subgoal _ _ = gripe BadSubgoal
 
 validSubProof
-  :: Setup
-  -> Context
-  -> SubProve () Appl
-  -> SubProve Anno TmR
-validSubProof setup ga ((srg, Given h : gs) ::- p@(Prove sg sm () sps src)) =
-  case scoApplTm ga h of
-    Left x -> (srg, map (fmap Your) (Given h : gs)) ::-
-      Prove (Your sg) (fmap Your sm) (Junk (Scope x), True)
-        (fmap subPassive sps) src
-    Right h@(Our ht _) -> case validSubProof setup (ga :< Hyp ht) ((srg, gs) ::- p) of
-      (srg, gs) ::- p -> (srg, Given h : gs) ::- p
-      s -> s
-validSubProof setup ga ((srg, []) ::- Prove sg sm () sps src) = case scoApplTm ga sg of
-  Left x -> (srg, []) ::- Prove  (Your sg) (fmap Your sm) (Junk (Scope x), True)
-    (fmap subPassive sps) src
-  Right sg -> (srg, []) ::- chkProof setup ga sg sm sps src
-validSubProof _ _ (SubPGuff ls) = SubPGuff ls
+  :: SubProve () Appl
+  -> AM (SubProve Anno TmR)
+validSubProof ((srg, Given h : gs) ::- p@(Prove sg sm () sps src)) =
+  cope (scoApplTm h)
+    (\ gr -> return $ (srg, map (fmap Your) (Given h : gs)) ::-
+      Prove (Your sg) (fmap Your sm) (Junk gr, True)
+        (fmap subPassive sps) src)
+    $ \ h@(Our ht _) -> do
+      (srg, gs) ::- p <- Hyp ht |- validSubProof ((srg, gs) ::- p)
+      return $ (srg, Given h : gs) ::- p
+validSubProof ((srg, []) ::- Prove sg sm () sps src) =
+  cope (scoApplTm sg)
+    (\ gr -> return $ (srg, []) ::- Prove  (Your sg) (fmap Your sm) (Junk gr, True)
+      (fmap subPassive sps) src)
+    $ \ sg -> ((srg, []) ::-) <$> chkProof sg sm sps src
+validSubProof (SubPGuff ls) = return $ SubPGuff ls
+
 
 fromSubs
-  :: Setup
-  -> Context
-  -> Tm      -- goal
+  :: Tm      -- goal
   -> Tm      -- fmla
-  -> [Tm]
-fromSubs setup ga g f = TC "prove" [f] : case
-  [ (n, stan m ss)  -- ignoring n will not always be ok
-  | ((h, n) :<= ss) <- introRules setup
-  , m <- mayl $ match mempty h f
-  ] of
-  [(_, [s])] -> flop s g
-  rs -> map (foldr wrangle (TC "prove" [g]) . snd) rs
+  -> AM [Tm]
+fromSubs g f = map snd {- ignorant -} <$> invert f >>= \case
+  [[s]] -> return $ flop s g
+  rs -> return $ map (foldr wrangle (TC "prove" [g])) rs
  where
   flop (TC "prove" [p]) g = [TC "given" [p, TC "prove" [g]]]
   flop (TC "given" [h, s]) g = TC "prove" [h] : flop s g
@@ -204,26 +187,30 @@ fromSubs setup ga g f = TC "prove" [f] : case
   wangle (TC "prove" [p]) = p
   wangle _ = TC "True" []
 
-mayl :: Maybe x -> [x]
-mayl = foldMap return
 
 testChkProof :: String -> [Prove Anno TmR]
 testChkProof = foldMap (bof . fst) . raw (fixities mySetup) where
-  bof (RawProof (Prove gr mr () ps src)) = [chkProof mySetup ga g mr ps src] where
+  bof (RawProof (Prove gr mr () ps src)) = case runAM (chkProof g mr ps src) mySetup ga of
+    Right p -> [p]
+    Left _  -> []
+   where
     (ga, g) = applScoTm gr
   bof _ = []
 
-pout :: Setup -> Context -> LayKind -> Prove Anno TmR -> Odd String [LexL]
-pout setup ga k p@(Prove g m (s, n) ps (h, b)) = let k' = scavenge b in case s of
-  Keep ->
-    (rfold lout (h `prove` n) . whereFormat b ps .
-     format k' $ psout k' ps)
-    :-/ Stop
-  Need ->
-    (("prove " ++) . (ppTmR setup ga AllOK g ++) . (" ?" ++) . whereFormat b ps .
-     format k' $ psout k' ps)
-    :-/ Stop
-  Junk e ->
+pout :: LayKind -> Prove Anno TmR -> AM (Odd String [LexL])
+pout k p@(Prove g m (s, n) ps (h, b)) = let k' = scavenge b in case s of
+  Keep -> do
+    blk <- psout k' ps
+    return $ (rfold lout (h `prove` n) . whereFormat b ps
+             $ format k' blk)
+             :-/ Stop
+  Need -> do
+    g <- ppTmR AllOK g
+    blk <- psout k' ps
+    return $ (("prove " ++) . (g ++) . (" ?" ++) . whereFormat b ps
+             $ format k' blk)
+             :-/ Stop
+  Junk e -> return $
     ("{- " ++ show e) :-/ [] :-\
     (rfold lout h . rfold lout b $ "") :-/ [] :-\
     "-}" :-/ Stop
@@ -233,34 +220,37 @@ pout setup ga k p@(Prove g m (s, n) ps (h, b)) = let k' = scavenge b in case s o
    (l : ls) `prove` n = l : (ls `prove` n)
    [] `prove` n = [] -- should never happen
    
-   psout :: LayKind -> Bloc (SubProve Anno TmR) -> Bloc String
-   psout k (g :-/ Stop) = g :-/ Stop
+   psout :: LayKind -> Bloc (SubProve Anno TmR) -> AM (Bloc String)
+   psout k (g :-/ Stop) = return $ g :-/ Stop
    psout k (g :-/ SubPGuff [] :-\ h :-/ r) = psout k ((g ++ h) :-/ r)
-   psout k (g :-/ p :-\ gpo) = g :-/ subpout k p `ocato` psout k gpo
+   psout k (g :-/ p :-\ gpo) =
+     (g :-/) <$> (ocato <$> subpout k p <*> psout k gpo)
 
-   subpout :: LayKind -> SubProve Anno TmR -> Odd String [LexL]
+   subpout :: LayKind -> SubProve Anno TmR -> AM (Odd String [LexL])
    subpout _ (SubPGuff ls)
-     | all gappy ls = rfold lout ls "" :-/ Stop
-     | otherwise = ("{- " ++ rfold lout ls " -}") :-/ Stop
-   subpout _ ((srg, gs) ::- Prove _ _ (Junk e, _) _ (h, b)) =
+     | all gappy ls = return $ rfold lout ls "" :-/ Stop
+     | otherwise = return $ ("{- " ++ rfold lout ls " -}") :-/ Stop
+   subpout _ ((srg, gs) ::- Prove _ _ (Junk e, _) _ (h, b)) = return $
      ("{- " ++ show e) :-/ [] :-\
      (rfold lout srg . rfold lout h . rfold lout b $ "") :-/ [] :-\
      "-}" :-/ Stop
-   subpout k ((srg, gs) ::- p) =
-     case pout setup (fish ga gs) k p of
-       p :-/ b ->
-         (if null srg then givs gs else rfold lout srg) p :-/ b
+   subpout k ((srg, gs) ::- p) = fish gs (pout k p) >>= \case
+     p :-/ b -> (:-/ b) <$>
+       ((if null srg then givs gs else pure $ rfold lout srg) <*> pure p)
     where
-     fish ga [] = ga
-     fish ga (Given h : gs) = case my h of
-       Nothing -> fish ga gs
-       Just h -> fish (ga :< Hyp h) gs
-     givs [] = id
-     givs (g : gs) =
-       ("given " ++) . (wallop g ++) . ((gs >>= ((", " ++) . wallop)) ++) . (" " ++)
+     fish [] p = p
+     fish (Given h : gs) p = case my h of
+       Nothing -> fish gs p
+       Just h -> Hyp h |- fish gs p
+     givs :: [Given TmR] -> AM (String -> String)
+     givs gs = traverse wallop gs >>= \case
+       [] -> return id
+       g : gs -> return $ 
+         ("given " ++) . (g ++) . rfold comma gs (" " ++)
        where
-         wallop (Given g) = ppTmR setup ga AllOK g
-      
+         wallop :: Given TmR -> AM String
+         wallop (Given g) = ppTmR AllOK g
+         comma s f = (", " ++) . (s ++) . f
    whereFormat :: [LexL] -> Bloc x -> String -> String
    whereFormat ls xs pso = case span gappy ls of
      (g, (T (("where", k) :-! _), _, _) : rs) ->
@@ -327,82 +317,15 @@ pout setup ga k p@(Prove g m (s, n) ps (h, b)) = let k' = scavenge b in case s o
      clos ls = (Sym, (0,0), "}") :ls
      sepa ls = (Sym, (0,0), ";") : ls ++ [(Spc, (0,0), " ")]
 
-{-
-defSepa :: LayKind -> String
-defSepa (Denty d) = "\n" ++ replicate (d - 1) ' '
-defSepa Bracy = "; "
-defSepa Empty = ""
-
-pout :: Setup -> LayKind -> Context -> Prove Status TmR -> String
-pout setup k ga p@(Prove g m (s, n) ps (h, b)) = case s of
-  Keep -> let (h', i) = tweak n h in rfold lout h' $ psout i b ps
-  Need -> "prove " ++ ppTmR setup ga AllOK g ++ " ?" ++ psout b ps
-  Junk e ->
-    let sepa = case k of
-          Bracy -> " "
-          k     -> defSepa k  
-    in "{- " ++ show e ++ sepa ++ rfold lout h . rfold lout b $ (sepa ++ "-}")
- where
-  tweak True  ((Key, p, "prove") : ls) = ((Key, p, "proven") : ls, 1)
-  tweak False ((Key, p, "proven") : ls) = ((Key, p, "prove") : ls, negate 1)
-  tweak n [] = ([], 0)
-  tweak n (l : ls) = (l : ls', i) where (ls', i) = tweak n ls
-  psout :: Int -> [LexL] -> Bloc (SubProve Status TmR) -> String
-  psout b ps = case span gappy b of
-    (g, (T ((_, "where", k') :-! m),_,_): ls) ->
-      let k'' = case k' of {Empty -> bump k; _ -> k'}
-      rfold lout g . ("where" ++) .
-
-{-
-(replicate (hdent + 2) ' ' ++) $ (case whereKind hdent m of
-        k@(Dental d) -> fmat k (ps >>= sub k)
-        k@(Bracy pre semi post) -> ("{" ++) . rfold lout pre . fmat k (ps >>= sub k)
-      )  (rfold lout gap . rfold lout ls $ "")
-    _ | null ps -> rfold lout b ""
-    _ ->
-      " where\n" ++ replicate (hdent + 2) ' ' ++
-      fmat k (ps >>= sub k) (rfold lout b "")
-      where k = Dental (hdent + 2)
--}
-
-  bump (Denty d) = Denty (d + 2)
-  bump Bracy     = Bracy
-  bump Empty     = Denty 1 -- shouldn't happen
-
-  subs :: LayKind -> Bloc (SubProve Status TmR) -> Bloc String
-  subs k
-  
-
-  sub :: WhereKind -> SubProve Status TmR -> [String]
-  sub k ((srg, gs) ::- Prove _ _ (Junk e) _ (h, b)) =
-    ["{-" ++ show e, rfold lout srg (rfold lout h (rfold lout b "")), "-}"]
-  sub k ((srg, gs) ::- p) = return $
-    (if null srg then givs gs else rfold lout srg)
-    (pout setup (Just k, mc) (fish ga gs) p)
-    where
-    mc = case span gappy srg of
-      (_, (_, (_, x), _) : _) -> Just (x - 1)
-      _ -> Nothing
-  sub k (SubPGuff ls) = ["{- " ++ rfold lout ls " -}"]
-  fish ga [] = ga
-  fish ga (Given h : gs) = case my h of
-    Nothing -> fish ga gs
-    Just h -> fish (ga :< Hyp h) gs
-  givs [] = id
-  givs (g : gs) =
-    ("given " ++) . (wallop g ++) . ((gs >>= ((", " ++) . wallop)) ++) . (" " ++)
-    where
-      wallop (Given g) = ppTmR setup ga AllOK g
--}
-
 filth :: String -> String
 filth s = bifoldMap (($ "") . rfold lout) yuk (raw (fixities mySetup) s) where
-  yuk (RawProof (Prove gr mr () ps src), _) =
-    bifoldMap id (($ "") . rfold lout)
-    . pout mySetup ga (Denty 1)
-    $ chkProof mySetup ga g mr ps src
+  yuk (RawProof (Prove gr mr () ps src), ls) = case runAM go mySetup ga of
+    Left e -> "{- " ++ show e ++ "\n" ++ rfold lout ls "\n-}"  -- shouldn't happen
+    Right s -> s
    where
     (ga, g) = applScoTm gr
-  yuk (RawSewage, ls) = "{- don't ask\n" ++ rfold lout ls "-}\n"
+    go :: AM String
+    go = bifoldMap id (($ "") . rfold lout) <$> 
+           (chkProof g mr ps src >>= pout (Denty 1))
+  yuk (RawSewage, ls) = "{- don't ask\n" ++ rfold lout ls "\n-}"
   yuk (_, ls) = rfold lout ls ""
-
