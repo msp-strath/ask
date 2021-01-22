@@ -2,7 +2,7 @@ module Ask.Src.Thin where
 
 import Data.Bits
 
-newtype Thinning = Th Integer
+newtype Thinning = Th Integer deriving Eq
 
 instance Show Thinning where
   show (Th th) = go th where

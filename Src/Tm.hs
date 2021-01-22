@@ -9,19 +9,21 @@ module Ask.Src.Tm where
 import Data.Bits
 import Data.List
 import Control.Applicative
+import Control.Arrow ((***))
 
 import Ask.Src.Thin
 import Ask.Src.HalfZip
 import Ask.Src.Hide
 
 type Nom = [(String, Int)]
+
 type Con = String
 
 data Pat
   = PM String Thinning
   | PC Con [Pat]
   | PB Pat
-  deriving Show
+  deriving (Show, Eq)
 
 data Bind b
   = K{-onstant-} b
@@ -105,6 +107,10 @@ instance Stan s => Stan [s] where
   stan ms = fmap (stan ms)
   sbst u es = fmap (sbst u es)
 
+instance (Stan s, Stan t) => Stan (s, t) where
+  stan ms = stan ms *** stan ms
+  sbst u es = sbst u es *** sbst u es
+
 instance Stan Syn where
   stan ms (t ::: _T) = stan ms t ::: stan ms _T
   stan ms (e :$ s) = stan ms e :$ stan ms s
@@ -137,6 +143,7 @@ instance Stan b => Stan (Bind b) where
   sbst u es (K b) = K (sbst u es b)
   sbst u es (L b) = L (sbst (u + 1) es b)
 
+{-
 data Tel x
   = TO x
   | Tm :*: Bind (Tel x)
@@ -153,6 +160,39 @@ instance Stan x => Stan (Tel x) where
   stan ms (s :*: t) = stan ms s :*: stan ms t
   sbst u es (TO x) = TO (sbst u es x)
   sbst u es (s :*: t) = sbst u es s :*: sbst u es t
+-}
 
 instance Thin () where _ <^> _ = () ; thicken _ _ = Just ()
 instance Stan () where stan _ _ = () ; sbst _ _ _ = ()
+
+instance Thin Con where c <^> _ = c ; thicken _ c = Just c
+instance Stan Con where stan _ c = c ; sbst _ _ c = c
+
+class MDep t where
+  mDep :: String -> t -> Bool
+
+instance MDep Tm where
+  mDep x (TM m es) = m == x || mDep x es
+  mDep x (TC _ ts) = mDep x ts
+  mDep x (TB t) = mDep x t
+  mDep x (TE e) = mDep x e
+
+instance MDep Syn where
+  mDep x (t ::: ty) = mDep x t || mDep x ty
+  mDep x (f :$ s) = mDep x f || mDep x s
+  mDep x _ = False
+
+instance MDep x => MDep [x] where
+  mDep x = any (mDep x)
+
+instance MDep b => MDep (Bind b) where
+  mDep x (K t) = mDep x t
+  mDep x (L t) = mDep x t
+
+topSort :: MDep t => [((String, t), z)] -> [((String, t), z)]
+topSort [] = []
+topSort (b : bs) = ins b (topSort bs) where
+  ins b [] = [b]
+  ins b@((x, _), _) (a@((_, t), _) : bs)
+    | mDep x t = b : a : bs
+    | otherwise = a : ins b bs

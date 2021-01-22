@@ -1,4 +1,4 @@
-{-# LANGUAGE TupleSections, LambdaCase #-}
+{-# LANGUAGE TupleSections, LambdaCase, PatternSynonyms #-}
 
 module Ask.Src.ChkRaw where
 
@@ -66,12 +66,11 @@ chkProof g m ps src = cope go junk return where
     Just gt -> do
       (m, ss) <- case m of
         Stub -> return $ (Stub, [])
-        By r -> do
-          r@(Our rt _) <- scoApplTm r
-          (By r,) <$> (gt `by` rt)
-        From h -> do
-          h@(Our ht _) <- scoApplTm h
+        By r -> (By *** id) <$> (gt `by` r)
+        From h@(_, (t, _, _) :$$ _) | elem t [Uid, Sym] -> do
+          h@(Our ht _) <- scoApplTm Prop h
           (From h,) <$> fromSubs gt ht
+        From _ -> gripe FromNeedsConnective
         MGiven -> do
           given gt
           return (MGiven, [])
@@ -120,7 +119,7 @@ chkSubProofs ss ps = do
   covers t ((_, hs) ::- Prove g m (Keep, _) _ _) = subgoal t $ \ t -> do
     g <- mayhem $ my g
     traverse ensure hs
-    equal (TC "Prop" []) (g, t)
+    equal Prop (g, t)
    where
     ensure (Given h) = mayhem (my h) >>= given
   covers t _ = gripe FAIL
@@ -136,7 +135,7 @@ chkSubProofs ss ps = do
   obvious s
     =   given s
     <|> given (TC "False" [])
-    <|> equal (TC "Prop" []) (s, TC "True" [])
+    <|> equal Prop (s, TC "True" [])
   need (TC "prove" [g]) =
     ([], []) ::- Prove (My g) Stub (Need, False)
       ([] :-/ Stop) ([], [])
@@ -156,7 +155,7 @@ validSubProof
   :: SubProve () Appl
   -> AM (SubProve Anno TmR)
 validSubProof ((srg, Given h : gs) ::- p@(Prove sg sm () sps src)) =
-  cope (scoApplTm h)
+  cope (scoApplTm Prop h)
     (\ gr -> return $ (srg, map (fmap Your) (Given h : gs)) ::-
       Prove (Your sg) (fmap Your sm) (Junk gr, True)
         (fmap subPassive sps) src)
@@ -164,7 +163,7 @@ validSubProof ((srg, Given h : gs) ::- p@(Prove sg sm () sps src)) =
       (srg, gs) ::- p <- ht |- validSubProof ((srg, gs) ::- p)
       return $ (srg, Given h : gs) ::- p
 validSubProof ((srg, []) ::- Prove sg sm () sps src) =
-  cope (scoApplTm sg)
+  cope (scoApplTm Prop sg)
     (\ gr -> return $ (srg, []) ::- Prove  (Your sg) (fmap Your sm) (Junk gr, True)
       (fmap subPassive sps) src)
     $ \ sg -> ((srg, []) ::-) <$> chkProof sg sm sps src
@@ -212,8 +211,8 @@ pout k p@(Prove g m (s, n) ps (h, b)) = let k' = scavenge b in case s of
              $ format k' blk)
              :-/ Stop
   Junk e -> return $
-    ("{- " ++ show e) :-/ [] :-\
-    (rfold lout h . rfold lout b $ "") :-/ [] :-\
+    ("{- " ++ show e) :-/ [(Ret, (0,0), "\n")] :-\
+    (rfold lout h . rfold lout b $ "") :-/ [(Ret, (0,0), "\n")] :-\
     "-}" :-/ Stop
  where
    ((Key, p, s) : ls) `prove` n | elem s ["prove", "proven"] =
@@ -326,13 +325,13 @@ filth s = bifoldMap (($ "") . rfold lout) yuk (raw (fixities mySetup) s) where
    where
     go :: AM String
     go = do
-      g <- applScoTm gr
+      g <- applScoTm (TC "Prop" []) gr
       bifoldMap id (($ "") . rfold lout) <$> 
            (chkProof g mr ps src >>= pout (Denty 1))
   yuk (RawSewage, ls) = "{- don't ask\n" ++ rfold lout ls "\n-}"
   yuk (_, ls) = rfold lout ls ""
   init :: AskState
   init = AskState
-    { context = B0
+    { context = myContext
     , root    = (B0, 0)
     }

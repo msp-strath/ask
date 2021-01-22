@@ -74,7 +74,7 @@ ppTm spot (TC f@(c : s) as)
     [] -> return f
     _  -> do
       as <- traverse (ppTm Arg) as
-      return $ f ++ (as >>= (" " ++))
+      return $ pppa spot App (f ++ (as >>= (" " ++)))
 ppTm spot (TE e) = ppEl spot e
 ppTm _ t = return $ show t
 

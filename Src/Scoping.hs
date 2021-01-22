@@ -1,4 +1,4 @@
-{-# LANGUAGE CPP, TupleSections, LambdaCase #-}
+{-# LANGUAGE CPP, TupleSections, LambdaCase, PatternSynonyms #-}
 module Ask.Src.Scoping where
 
 import Data.List
@@ -6,6 +6,8 @@ import Control.Monad
 import qualified Control.Monad.Fail as Fail
 import Control.Applicative
 import qualified Data.Map as M
+import Data.Foldable
+import Control.Arrow ((***))
 
 import Ask.Src.Bwd
 import Ask.Src.Thin
@@ -20,8 +22,10 @@ data Gripe
   = Surplus
   | Scope String
   | ByBadRule
+  | FromNeedsConnective
   | NotGiven
   | NotEqual
+  | NotARule
   | ByAmbiguous
   | Mardiness
   | BadSubgoal
@@ -104,35 +108,46 @@ maAM p t = go mempty (p, t) where
     _ -> gripe FAIL
 
 data Rule =
-  (Pat, Pat) :<=
+  (Pat, (String, [(Con, Tm)])) :<=
   [ Tm
   ]
-  deriving Show
+  deriving (Show, Eq)
 
-by :: Tm -> Tm -> AM [Tm]
-by goal invok = do
-  byrs <- AM $ \ s as -> Right (introRules s ++ weirdRules s, as)
-  subses <- concat <$> traverse backchain byrs
+by :: Tm -> Appl -> AM (TmR, [Tm])
+by goal a@(_, (t, _, _) :$$ _) | elem t [Uid, Sym] = do
+  subses <- fold <$> (gamma >>= traverse (backchain a))
   case subses of
     [subs] -> return subs
     []     -> gripe ByBadRule
     _      -> gripe ByAmbiguous
  where
-  backchain :: Rule -> AM [[Tm]] -- list of successes
-  backchain ((gop, rup) :<= prems) = cope
-    ((++) <$> maAM gop goal <*> maAM rup invok)
+  backchain :: Appl -> CxE -> AM [(TmR, [Tm])] -- list of successes
+  backchain a@(_, (_, _, r) :$$ ss) (ByRule _ ((gop, (h, ps)) :<= prems)) | h == r = cope (do
+    let tmpl = TC r [TM x [] | (x, _) <- ps]
+    m <- maAM gop goal
+    bs <- mayhem $ topSort <$> halfZip ps ss
+    m <- argChk m bs
+    return [(Our (stan m tmpl) a, stan m prems)]
+    )
     (\ _ -> return [])
-    (\ m -> return [stan m prems])
+    return
+  backchain _ _ = return []
+by goal _ = gripe NotARule
 
-invert :: Tm -> AM [(Pat, [Tm])]
-invert hyp = do
-  intros <- AM $ \ s as -> Right (introRules s, as)
-  concat <$> traverse try intros
+argChk :: Matching -> [((String, Tm), Appl)] -> AM Matching
+argChk m [] = return m
+argChk m (((x, t), a) : bs) = do
+  a@(Our s _) <- scoApplTm (stan m t) a
+  argChk ((x, s) : m) bs
+
+invert :: Tm -> AM [((String, [(String, Tm)]), [Tm])]
+invert hyp = fold <$> (gamma >>= traverse try )
  where
-  try :: Rule -> AM [(Pat, [Tm])]
-  try ((gop, rup) :<= prems) = cope (maAM gop hyp)
+  try :: CxE -> AM [((String, [(String, Tm)]), [Tm])]
+  try (ByRule True ((gop, vok) :<= prems)) = cope (maAM gop hyp)
     (\ _ -> return [])
-    (\ m -> return [(rup, stan m prems)])
+    (\ m -> return [((id *** map (id *** stan m)) vok, stan m prems)])
+  try _ = return []
 
 type Context = Bwd CxE
 
@@ -141,6 +156,7 @@ data CxE -- what sort of thing is in the context?
   | Var String  -- dear god no, fix this to be locally nameless
   | Bind (Nom, Hide Tm) BKind
   | ImplicitQuantifier
+  | ByRule Bool{- pukka intro?-} Rule
   deriving (Show, Eq) -- get rid of that Eq!
 
 data BKind
@@ -187,7 +203,7 @@ what's x = do
   go B0 = gripe (Scope x)
   go (_ :< Bind p (User y)) | x == y = return (TP p, Nothing)
   go ga@(_ :< ImplicitQuantifier) = do
-    xTp <- (, Hide (TC "Type" [])) <$> fresh "Ty"
+    xTp <- (, Hide Type) <$> fresh "Ty"
     xp  <- (, Hide (TE (TP xTp)))  <$> fresh x
     return (TP xp, Just (ga :< Bind xTp Hole :< Bind xp (User x)))
   go (ga :< z) = do
@@ -210,8 +226,8 @@ h |- p = do
     _ -> False
   return x
 
-scoApplTm :: Appl -> AM TmR
-scoApplTm a@(_, t) = ((`Our` a)) <$> go t
+scoApplTm :: Tm -> Appl -> AM TmR
+scoApplTm ty a@(_, t) = ((`Our` a)) <$> go t
   where
     go :: Appl' -> AM Tm
     go ((t, _, y) :$$ ras) = case t of
@@ -219,10 +235,20 @@ scoApplTm a@(_, t) = ((`Our` a)) <$> go t
       _   -> TC y <$> as
       where as = traverse (go . snd) ras
 
-applScoTm :: Appl -> AM TmR
-applScoTm a = do
+-- currently a knock-off, this checks that rules are good for props
+scoApplRu :: Tm -> Appl -> AM TmR
+scoApplRu ty a@(_, t) = ((`Our` a)) <$> go t
+  where
+    go :: Appl' -> AM Tm
+    go ((t, _, y) :$$ ras) = case t of
+      Lid -> TE <$> (foldl (:$) <$> what's y <*> as)
+      _   -> TC y <$> as
+      where as = traverse (go . snd) ras
+
+applScoTm :: Tm -> Appl -> AM TmR
+applScoTm ty a = do
   push ImplicitQuantifier
-  t <- scoApplTm a
+  t <- scoApplTm ty a
   pop $ \case
     ImplicitQuantifier -> True
     _ -> False
@@ -232,3 +258,6 @@ nomBKind :: Nom -> AM BKind
 nomBKind x = gamma >>= foldl me empty where
   me no (Bind (y, _) bk) | x == y = return bk
   me no _ = no
+
+pattern Type = TC "Type" []
+pattern Prop = TC "Prop" []

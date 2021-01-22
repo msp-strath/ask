@@ -2,6 +2,7 @@ module Ask.Src.HardwiredRules where
 
 import qualified Data.Map as M
 
+import Ask.Src.Bwd
 import Ask.Src.Tm
 import Ask.Src.RawAsk
 import Ask.Src.Scoping
@@ -22,29 +23,35 @@ myFixities = M.fromList
 
 myIntroRules :: [Rule]
 myIntroRules =
-  [ (PC "&" [PM "a" mempty, PM "b" mempty], PC "AndI" []) :<=
+  [ (PC "&" [PM "a" mempty, PM "b" mempty], ("AndI", [])) :<=
     [ TC "prove" [TM "a" []]
     , TC "prove" [TM "b" []]
     ]
-  , (PC "|" [PM "a" mempty, PM "b" mempty], PC "OrIL" []) :<=
+  , (PC "|" [PM "a" mempty, PM "b" mempty], ("OrIL", [])) :<=
     [ TC "prove" [TM "a" []]
     ]
-  , (PC "|" [PM "a" mempty, PM "b" mempty], PC "OrIR" []) :<=
+  , (PC "|" [PM "a" mempty, PM "b" mempty], ("OrIR", [])) :<=
     [ TC "prove" [TM "b" []]
     ]
-  , (PC "->" [PM "a" mempty, PM "b" mempty], PC "ImpI" []) :<=
+  , (PC "->" [PM "a" mempty, PM "b" mempty], ("ImpI", [])) :<=
     [ TC "given" [TM "a" [], TC "prove" [TM "b" []]]
     ]
-  , (PC "Not" [PM "a" mempty], PC "NotI" []) :<=
+  , (PC "Not" [PM "a" mempty], ("NotI", [])) :<=
     [ TC "given" [TM "a" [], TC "prove" [TC "False" []]]
     ]
-  , (PC "True" [], PC "TrueI" []) :<= []
+  , (PC "True" [], ("TrueI", [])) :<= []
   ]
 
 myWeirdRules :: [Rule]
 myWeirdRules =
-  [ (PM "x" mempty, PC "Contradiction" []) :<=
+  [ (PM "x" mempty, ("Contradiction", [])) :<=
     [ TC "given" [TC "Not" [TM "x" []],
       TC "prove" [TC "False" []]]
     ]
   ]
+
+myContext :: Context
+myContext = B0
+  <>< [ByRule True  r | r <- myIntroRules]
+  <>< [ByRule False r | r <- myWeirdRules]
+
