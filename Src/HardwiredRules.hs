@@ -5,7 +5,7 @@ import qualified Data.Map as M
 import Ask.Src.Bwd
 import Ask.Src.Tm
 import Ask.Src.RawAsk
-import Ask.Src.Scoping
+import Ask.Src.Typing
 
 mySetup :: Setup
 mySetup = Setup

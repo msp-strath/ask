@@ -18,7 +18,7 @@ import Ask.Src.Lexing
 import Ask.Src.RawAsk
 import Ask.Src.Tm
 import Ask.Src.Glueing
-import Ask.Src.Scoping
+import Ask.Src.Typing
 import Ask.Src.Printing
 import Ask.Src.HardwiredRules
 

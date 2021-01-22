@@ -1,6 +1,6 @@
 {-# LANGUAGE CPP, TupleSections, LambdaCase, PatternSynonyms,
     TypeSynonymInstances, FlexibleInstances #-}
-module Ask.Src.Scoping where
+module Ask.Src.Typing where
 
 import Data.List
 import Control.Monad

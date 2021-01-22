@@ -9,7 +9,7 @@ import Ask.Src.Lexing
 import Ask.Src.RawAsk
 import Ask.Src.Tm
 import Ask.Src.Glueing
-import Ask.Src.Scoping
+import Ask.Src.Typing
 
 data Spot = AllOK | RadSpot | Infix (Int, Either Assocy Assocy) | Fun | Arg deriving (Show, Eq)
 data Wot = Rad | Inf (Int, Assocy) | App deriving (Show, Eq)
