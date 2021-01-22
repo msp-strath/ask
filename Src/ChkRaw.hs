@@ -324,7 +324,10 @@ pout k p@(Prove g m (s, n) ps (h, b)) = let k' = scavenge b in case s of
 filth :: String -> String
 filth s = bifoldMap (($ "") . rfold lout) yuk (raw (fixities mySetup) s) where
   yuk (RawProof (Prove gr mr () ps src), ls) = case runAM go mySetup init of
-    Left e -> "{- " ++ show e ++ "\n" ++ rfold lout ls "\n-}"  -- shouldn't happen
+    Left e -> case runAM (ppGripe e) mySetup init of
+      Left _ -> "{- " ++ show e ++ "\n" ++ rfold lout ls "\n-}"
+      Right (e, _) ->
+         "{- " ++ e ++ "\n" ++ rfold lout ls "\n-}"
     Right (s, _) -> s
    where
     go :: AM String
