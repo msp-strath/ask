@@ -5,13 +5,11 @@ import qualified Data.Map as M
 import Ask.Src.Bwd
 import Ask.Src.Tm
 import Ask.Src.RawAsk
-import Ask.Src.Scoping
+import Ask.Src.Typing
 
 mySetup :: Setup
 mySetup = Setup
-  { introRules = myIntroRules
-  , weirdRules = myWeirdRules
-  , fixities   = myFixities
+  { fixities   = myFixities
   }
 
 myFixities :: FixityTable
@@ -20,6 +18,16 @@ myFixities = M.fromList
   , ("|", (6, RAsso))
   , ("->", (1, RAsso))
   ]
+
+myPreamble :: Context
+myPreamble = B0
+  :< (("Type", []) ::> ("Prop", []))
+  :< (("Prop", []) ::> ("->", [("s", Prop), ("t", Prop)]))
+  :< (("Prop", []) ::> ("&", [("s", Prop), ("t", Prop)]))
+  :< (("Prop", []) ::> ("|", [("s", Prop), ("t", Prop)]))
+  :< (("Prop", []) ::> ("Not", [("s", Prop)]))
+  :< (("Prop", []) ::> ("False", []))
+  :< (("Prop", []) ::> ("True", []))
 
 myIntroRules :: [Rule]
 myIntroRules =
@@ -51,7 +59,7 @@ myWeirdRules =
   ]
 
 myContext :: Context
-myContext = B0
+myContext = myPreamble
   <>< [ByRule True  r | r <- myIntroRules]
   <>< [ByRule False r | r <- myWeirdRules]
 

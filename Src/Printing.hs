@@ -9,7 +9,7 @@ import Ask.Src.Lexing
 import Ask.Src.RawAsk
 import Ask.Src.Tm
 import Ask.Src.Glueing
-import Ask.Src.Scoping
+import Ask.Src.Typing
 
 data Spot = AllOK | RadSpot | Infix (Int, Either Assocy Assocy) | Fun | Arg deriving (Show, Eq)
 data Wot = Rad | Inf (Int, Assocy) | App deriving (Show, Eq)
@@ -90,3 +90,40 @@ ppEl spot (f :$ s) = do
   s <-  ppTm Arg s
   return . pppa spot App $ f ++ " " ++ s
 
+ppGripe :: Gripe -> AM String
+ppGripe Surplus = return "I don't see why you need this"
+ppGripe (Scope x) = return $ "I can't find " ++ x ++ " in scope"
+ppGripe (ByBadRule r t) = do
+  t <- ppTm AllOK t
+  return $ "I can't find a rule called " ++ r ++ " that would prove " ++ t
+ppGripe (ByAmbiguous r t) = do
+  t <- ppTm AllOK t
+  return $ "Please report a bug: I have too many rules called " ++ r ++ " that would prove " ++ t
+ppGripe (FromNeedsConnective (ls, _)) = return $
+  rfold lout ls " has no main connective for 'from' to eliminate."
+ppGripe (NotGiven p) = do
+  p <- ppTm AllOK p
+  return $ "I do not remember being given " ++ p
+ppGripe (NotARule (ls, _)) = return $ rfold lout ls " is not the right shape to be a rule."
+ppGripe Mardiness = return $
+  "I seem to be unhappy but I can't articulate why, except that it's Conor's fault."
+ppGripe BadSubgoal = return "Please report a bug: I have found a badly structured subgoal."
+ppGripe (WrongNumOfArgs c n as) = return $
+  c ++ " expects " ++ count n ++ " but you have given it " ++ blat as
+  where
+  count 0 = "no arguments"
+  count 1 = "one argument"
+  count 2 = "two arguments"
+  count 3 = "three arguments"
+  count n = show n ++ " arguments"
+  blat [] = "none"
+  blat [(ls, _)] = rfold lout ls ""
+  blat ((ls, _) : as) = rfold lout ls $ " and " ++ blat as
+ppGripe (DoesNotMake c ty) = do
+  ty <- ppTm AllOK ty
+  return $ c ++ " cannot make a thing of type " ++ ty
+ppGripe (OverOverload c) = return $
+  "Please report a bug. " ++ c ++ " has unsafe overloading."
+ppGripe FAIL = return $
+  "It went wrong but I've forgotten how. Please ask a human for help."
+ppGripe g = return $ show g
