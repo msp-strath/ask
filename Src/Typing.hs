@@ -21,7 +21,7 @@ import Ask.Src.RawAsk
 import Ask.Src.Tm
 import Ask.Src.Glueing
 
-track = trace
+track = const id
 
 type Context = Bwd CxE
 
@@ -49,19 +49,19 @@ data BKind
 data Gripe
   = Surplus
   | Scope String
-  | ByBadRule
-  | FromNeedsConnective
-  | NotGiven
+  | ByBadRule String Tm
+  | ByAmbiguous String Tm
+  | FromNeedsConnective Appl
+  | NotGiven Tm
   | NotEqual
-  | NotARule
-  | ByAmbiguous
+  | NotARule Appl
   | Mardiness
   | BadSubgoal
-  | WrongNumOfArgs Con
-  | DoesNotMake Con Con
+  | WrongNumOfArgs Con Int [Appl]
+  | DoesNotMake Con Tm
   | OverOverload Con
   | FAIL
-  deriving (Show, Eq)
+  deriving Show
 
 type Root = (Bwd (String, Int), Int)
 
@@ -157,12 +157,12 @@ maAM (p, t) = go mempty (p, t) where
     _ -> gripe FAIL
 
 by :: Tm -> Appl -> AM (TmR, [Tm])
-by goal a@(_, (t, _, _) :$$ _) | elem t [Uid, Sym] = do
+by goal a@(_, (t, _, s) :$$ _) | elem t [Uid, Sym] = do
   subses <- fold <$> (gamma >>= traverse (backchain a))
   case subses of
     [subs] -> return subs
-    []     -> gripe ByBadRule
-    _      -> gripe ByAmbiguous
+    []     -> gripe $ ByBadRule s goal
+    _      -> gripe $ ByAmbiguous s goal
  where
   backchain :: Appl -> CxE -> AM [(TmR, [Tm])] -- list of successes
   backchain a@(_, (_, _, r) :$$ ss) (ByRule _ ((gop, (h, ps)) :<= prems)) | h == r = cope (do
@@ -175,7 +175,7 @@ by goal a@(_, (t, _, _) :$$ _) | elem t [Uid, Sym] = do
     (\ _ -> return [])
     return
   backchain _ _ = return []
-by goal _ = gripe NotARule
+by goal r = gripe $ NotARule r
 
 argChk :: Matching -> [((String, Tm), Appl)] -> AM Matching
 argChk m [] = return m
@@ -239,7 +239,7 @@ what's x = do
 
 given :: Tm -> AM ()
 given goal = gamma >>= go where
-  go B0 = gripe NotGiven
+  go B0 = gripe $ NotGiven goal
   go (ga :< Hyp hyp) = cope (equal (TC "Prop" []) (hyp, goal))
     (\ gr -> go ga) return
   go (ga :< _) = go ga
@@ -265,12 +265,12 @@ scoApplTm ty a@(_, t) = ((`Our` a)) <$> go t
       _   -> do
         TC d ss <- hnf ty
         (fold <$> (gamma >>= traverse (try d ss y))) >>= \case
-          [] -> gripe (DoesNotMake y d)
+          [] -> gripe (DoesNotMake y ty)
           _ : _ : _ -> gripe (OverOverload y)
           [(m, as)] -> do
             let tmpl = TC y [TM x [] | (x, _) <- as]
             bs <- cope (mayhem $ topSort <$> halfZip as ras)
-                    (\ _ -> gripe (WrongNumOfArgs y))
+                    (\ _ -> gripe (WrongNumOfArgs y (length as) ras))
                     return
             m <- argChk m bs
             return $ stan m tmpl

@@ -33,7 +33,7 @@ data Status
   = Junk Gripe
   | Keep
   | Need
-  deriving (Show, Eq)
+  deriving Show
 
 passive :: Prove () Appl -> Prove Anno TmR
 passive (Prove g m () ps src) =
@@ -70,7 +70,7 @@ chkProof g m ps src = cope go junk return where
         From h@(_, (t, _, _) :$$ _) | elem t [Uid, Sym] -> do
           h@(Our ht _) <- scoApplTm Prop h
           (From h,) <$> ((TC "prove" [ht] :) <$> fromSubs gt ht)
-        From _ -> gripe FromNeedsConnective
+        From h -> gripe $ FromNeedsConnective h
         MGiven -> do
           given gt
           return (MGiven, [])
@@ -210,10 +210,12 @@ pout k p@(Prove g m (s, n) ps (h, b)) = let k' = scavenge b in case s of
     return $ (("prove " ++) . (g ++) . (" ?" ++) . whereFormat b ps
              $ format k' blk)
              :-/ Stop
-  Junk e -> return $
-    ("{- " ++ show e) :-/ [(Ret, (0,0), "\n")] :-\
-    (rfold lout h . rfold lout b $ "") :-/ [(Ret, (0,0), "\n")] :-\
-    "-}" :-/ Stop
+  Junk e -> do
+    e <- ppGripe e
+    return $
+      ("{- " ++ e) :-/ [(Ret, (0,0), "\n")] :-\
+      (rfold lout h . rfold lout b $ "") :-/ [(Ret, (0,0), "\n")] :-\
+      "-}" :-/ Stop
  where
    ((Key, p, s) : ls) `prove` n | elem s ["prove", "proven"] =
      (Key, p, "prove" ++ if n then "n" else "") : ls
@@ -230,10 +232,12 @@ pout k p@(Prove g m (s, n) ps (h, b)) = let k' = scavenge b in case s of
    subpout _ (SubPGuff ls)
      | all gappy ls = return $ rfold lout ls "" :-/ Stop
      | otherwise = return $ ("{- " ++ rfold lout ls " -}") :-/ Stop
-   subpout _ ((srg, gs) ::- Prove _ _ (Junk e, _) _ (h, b)) = return $
-     ("{- " ++ show e) :-/ [] :-\
-     (rfold lout srg . rfold lout h . rfold lout b $ "") :-/ [] :-\
-     "-}" :-/ Stop
+   subpout _ ((srg, gs) ::- Prove _ _ (Junk e, _) _ (h, b)) = do
+     e <- ppGripe e
+     return $
+       ("{- " ++ e) :-/ [] :-\
+       (rfold lout srg . rfold lout h . rfold lout b $ "") :-/ [] :-\
+       "-}" :-/ Stop
    subpout k ((srg, gs) ::- p) = fish gs (pout k p) >>= \case
      p :-/ b -> (:-/ b) <$>
        ((if null srg then givs gs else pure $ rfold lout srg) <*> pure p)
