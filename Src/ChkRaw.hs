@@ -22,7 +22,7 @@ import Ask.Src.Scoping
 import Ask.Src.Printing
 import Ask.Src.HardwiredRules
 
-track = trace
+track = const id
 
 type Anno =
   ( Status
