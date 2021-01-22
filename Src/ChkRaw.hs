@@ -69,7 +69,7 @@ chkProof g m ps src = cope go junk return where
         By r -> (By *** id) <$> (gt `by` r)
         From h@(_, (t, _, _) :$$ _) | elem t [Uid, Sym] -> do
           h@(Our ht _) <- scoApplTm Prop h
-          (From h,) <$> fromSubs gt ht
+          (From h,) <$> ((ht :) <$> fromSubs gt ht)
         From _ -> gripe FromNeedsConnective
         MGiven -> do
           given gt
