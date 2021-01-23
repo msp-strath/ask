@@ -23,7 +23,7 @@ import Ask.Src.Proving
 import Ask.Src.Printing
 import Ask.Src.HardwiredRules
 
-track = const id
+tracy = trace
 
 type Anno =
   ( Status
@@ -94,8 +94,8 @@ chkSubProofs
   :: Bloc (SubProve () Appl)         -- subproofs coming from user
   -> AM (Bloc (SubProve Anno TmR))   -- reconstruction
 chkSubProofs ps = do
-  ps <- traverse validSubProof ps
   ss <- demands
+  ps <- traverse validSubProof ps
   (qs, us) <- cover ss (fmap (False,) ps)
   vs <- extra us
   return $ glom (fmap squish qs) vs
