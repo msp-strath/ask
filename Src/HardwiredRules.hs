@@ -5,7 +5,7 @@ import qualified Data.Map as M
 import Ask.Src.Bwd
 import Ask.Src.Tm
 import Ask.Src.RawAsk
-import Ask.Src.Typing
+import Ask.Src.Context
 
 mySetup :: Setup
 mySetup = Setup
@@ -21,40 +21,39 @@ myFixities = M.fromList
 
 myPreamble :: Context
 myPreamble = B0
-  :< (("Type", []) ::> ("Prop", []))
-  :< (("Prop", []) ::> ("->", [("s", Prop), ("t", Prop)]))
-  :< (("Prop", []) ::> ("&", [("s", Prop), ("t", Prop)]))
-  :< (("Prop", []) ::> ("|", [("s", Prop), ("t", Prop)]))
-  :< (("Prop", []) ::> ("Not", [("s", Prop)]))
-  :< (("Prop", []) ::> ("False", []))
-  :< (("Prop", []) ::> ("True", []))
+  :< (("Type", []) ::> ("Prop", Pr TRUE))
+  :< (("Prop", []) ::> ("->", ("s", Prop) :*: ("t", Prop) :*: Pr TRUE))
+  :< (("Prop", []) ::> ("&", ("s", Prop) :*: ("t", Prop) :*: Pr TRUE))
+  :< (("Prop", []) ::> ("|", ("s", Prop) :*: ("t", Prop) :*: Pr TRUE))
+  :< (("Prop", []) ::> ("Not", ("s", Prop) :*: Pr TRUE))
+  :< (("Prop", []) ::> ("False", Pr TRUE))
+  :< (("Prop", []) ::> ("True", Pr TRUE))
 
 myIntroRules :: [Rule]
 myIntroRules =
-  [ (PC "&" [PM "a" mempty, PM "b" mempty], ("AndI", [])) :<=
-    [ TC "prove" [TM "a" []]
-    , TC "prove" [TM "b" []]
+  [ (PC "&" [PM "a" mempty, PM "b" mempty], ("AndI", Pr TRUE)) :<=
+    [ PROVE $ TM "a" []
+    , PROVE $ TM "b" []
     ]
-  , (PC "|" [PM "a" mempty, PM "b" mempty], ("OrIL", [])) :<=
-    [ TC "prove" [TM "a" []]
+  , (PC "|" [PM "a" mempty, PM "b" mempty], ("OrIL", Pr TRUE)) :<=
+    [ PROVE $ TM "a" []
     ]
-  , (PC "|" [PM "a" mempty, PM "b" mempty], ("OrIR", [])) :<=
-    [ TC "prove" [TM "b" []]
+  , (PC "|" [PM "a" mempty, PM "b" mempty], ("OrIR", Pr TRUE)) :<=
+    [ PROVE $ TM "b" []
     ]
-  , (PC "->" [PM "a" mempty, PM "b" mempty], ("ImpI", [])) :<=
-    [ TC "given" [TM "a" [], TC "prove" [TM "b" []]]
+  , (PC "->" [PM "a" mempty, PM "b" mempty], ("ImpI", Pr TRUE)) :<=
+    [ GIVEN (TM "a" []) . PROVE $ TM "b" []
     ]
-  , (PC "Not" [PM "a" mempty], ("NotI", [])) :<=
-    [ TC "given" [TM "a" [], TC "prove" [TC "False" []]]
+  , (PC "Not" [PM "a" mempty], ("NotI", Pr TRUE)) :<=
+    [ GIVEN (TM "a" []) . PROVE $ TC "False" []
     ]
-  , (PC "True" [], ("TrueI", [])) :<= []
+  , (PC "True" [], ("TrueI", Pr TRUE)) :<= []
   ]
 
 myWeirdRules :: [Rule]
 myWeirdRules =
-  [ (PM "x" mempty, ("Contradiction", [])) :<=
-    [ TC "given" [TC "Not" [TM "x" []],
-      TC "prove" [TC "False" []]]
+  [ (PM "x" mempty, ("Contradiction", Pr TRUE)) :<=
+    [ GIVEN (TC "Not" [TM "x" []]) $ PROVE FALSE
     ]
   ]
 

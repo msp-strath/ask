@@ -1,7 +1,15 @@
-{-# LANGUAGE TupleSections
-           , DeriveTraversable
-           , TypeSynonymInstances
-           , FlexibleInstances
+------------------------------------------------------------------------------
+----------                                                          ----------
+----------     Ask.Src.Tm                                           ----------
+----------                                                          ----------
+------------------------------------------------------------------------------
+
+{-# LANGUAGE
+    TupleSections
+  , DeriveTraversable
+  , TypeSynonymInstances
+  , FlexibleInstances
+  , PatternSynonyms
 #-}
 
 module Ask.Src.Tm where
@@ -15,14 +23,25 @@ import Ask.Src.Thin
 import Ask.Src.HalfZip
 import Ask.Src.Hide
 
-type Nom = [(String, Int)]
 
-type Con = String
+------------------------------------------------------------------------------
+--  Representation of Terms
+------------------------------------------------------------------------------
 
-data Pat
-  = PM String Thinning
-  | PC Con [Pat]
-  | PB Pat
+type Tm = Chk Syn
+
+data Chk s
+  = TM String [s]       -- metavariable instantiation
+  | TC Con [Chk s]      -- canonical form
+  | TB (Bind (Chk s))   -- binding form
+  | TE s                -- other stuff
+  deriving (Eq, Show, Functor, Foldable, Traversable)
+
+data Syn
+  = TV Int              -- de Bruijn index
+  | TP (Nom, Hide Tm)   -- named var, with cached type
+  | Tm ::: Tm           -- radical
+  | Syn :$ Tm           -- elimination
   deriving (Show, Eq)
 
 data Bind b
@@ -30,24 +49,54 @@ data Bind b
   | L{-ambda-}   b
   deriving (Eq, Show, Functor, Foldable, Traversable)
 
-data Chk s
-  = TM String [s]
-  | TC Con [Chk s]
-  | TB (Bind (Chk s))
-  | TE s
-  deriving (Eq, Show, Functor, Foldable, Traversable)
+type Con = String            -- canonical constructors get to be plain names
+-- these are a few of our favourite things
+pattern Type      = TC "Type" []
+pattern Prop      = TC "Prop" []
+pattern TRUE      = TC "True" []
+pattern FALSE     = TC "False" []
+pattern (:->) s t = TC "->" [s, t]
 
-type Tm = Chk Syn
+type Nom = [(String, Int)]   -- names for parameters are chosen by the system
 
-instance Thin s => Thin (Bind s) where
-  K s <^> th = K (s <^> th)
-  L s <^> th = L (s <^> os th)
-  thicken th (K s) = K <$> thicken th s
-  thicken th (L s) = L <$> thicken (os th) s
 
-instance Thin s => Thin [s] where
-  ss <^> th = fmap (<^> th) ss
-  thicken th ss = traverse (thicken th) ss
+------------------------------------------------------------------------------
+--  Patterns
+------------------------------------------------------------------------------
+
+data Pat
+  = PM String Thinning     -- metavariable binding site
+  | PC Con [Pat]           -- canonical pattern
+  | PB Pat                 -- binding pattern
+  deriving (Show, Eq)
+
+
+------------------------------------------------------------------------------
+--  Telescopes, used to give types for constructor argument vectors
+------------------------------------------------------------------------------
+
+data Tel
+  = Ex Tm (Bind Tel)       -- implicit existential
+  | (String, Tm) :*: Tel   -- named explicit fields
+  | Pr Tm                  -- proof obligation, e.g., TRUE
+  deriving Show
+infixr 6 :*:
+
+
+------------------------------------------------------------------------------
+--  Subgoals
+------------------------------------------------------------------------------
+
+data Subgoal
+  = PROVE Tm          -- of type Prop
+  | GIVEN Tm Subgoal  -- the hyp is a Prop
+  -- more to follow, no doubt
+  deriving Show
+
+
+------------------------------------------------------------------------------
+--  Thin all the Things
+------------------------------------------------------------------------------
 
 instance Thin s => Thin (Chk s) where
   TM m ss <^> th = TM m (ss <^> th)
@@ -59,13 +108,6 @@ instance Thin s => Thin (Chk s) where
   thicken th (TB t)    = TB <$> thicken th t
   thicken th (TE s)    = TE <$> thicken th s
   
-data Syn
-  = TV Int         -- de Bruijn index
-  | TP (Nom, Hide Tm)   -- named var, with cached type
-  | Tm ::: Tm
-  | Syn :$ Tm
-  deriving (Show, Eq)
-
 instance Thin Syn where
   TV i <^> th = TV (i <^> th)
   (t ::: _T) <^> th = (t <^> th) ::: (_T <^> th)
@@ -76,16 +118,36 @@ instance Thin Syn where
   thicken th (e :$ s) = (:$) <$> thicken th e <*> thicken th s
   thicken th (TP x) = pure (TP x)
 
-match :: Thin s   -- s is almost always Syn, but parametricity matters
-      => Thinning -- what thinning maps bound vars in tm to bound vars in pat?
-      -> Pat      -- pattern to match against
-      -> Chk s    -- term to match
-      -> Maybe [(String, Chk s)]
-match ph (PM m th) t = ((:[]) . (m,)) <$> thicken th (t <^> ph)
-match ph (PC x ps) (TC y ts) | x == y = concat <$> halfZipWith (match ph) ps ts
-match ph (PB p) (TB (K t)) = match (o' ph) p t
-match ph (PB p) (TB (L t)) = match (os ph) p t
-match _ _ _ = Nothing
+instance Thin s => Thin (Bind s) where
+  K s <^> th = K (s <^> th)
+  L s <^> th = L (s <^> os th)
+  thicken th (K s) = K <$> thicken th s
+  thicken th (L s) = L <$> thicken (os th) s
+
+instance Thin s => Thin [s] where
+  ss <^> th = fmap (<^> th) ss
+  thicken th ss = traverse (thicken th) ss
+
+instance Thin Tel where
+  Ex s b         <^> th = Ex (s <^> th) (b <^> th)
+  ((x, s) :*: t) <^> th = (x, s <^> th) :*: (t <^> th)
+  Pr p           <^> th = Pr (p <^> th)
+  thicken th (Ex s b)       = Ex <$> thicken th s <*> thicken th b
+  thicken th ((x, s) :*: t) = (:*:) <$> ((x,) <$> thicken th s) <*> thicken th t
+  thicken th (Pr p)         = Pr <$> thicken th p
+
+instance Thin Subgoal where
+  PROVE g   <^> th = PROVE (g <^> th)
+  GIVEN h g <^> th = GIVEN (h <^> th) (g <^> th)
+  thicken th (PROVE g)   = PROVE <$> thicken th g
+  thicken th (GIVEN h g) = GIVEN <$> thicken th h <*> thicken th g
+
+instance Thin () where _ <^> _ = () ; thicken _ _ = Just ()
+
+
+------------------------------------------------------------------------------
+--  Metavariable Matchings, instantiation, substitution
+------------------------------------------------------------------------------
 
 type Matching = [(String, Chk Syn)]
 
@@ -95,6 +157,7 @@ class Stan t where
   sbst :: Int -> [Syn]
        -> t -> t
 
+-- yer ordinary rhythm'n'blues, yer basic rock'n'roll
 (//) :: Stan t => Bind t -> Syn -> t
 K t // e = t
 L t // e = sbst 0 [e] t
@@ -143,30 +206,26 @@ instance Stan b => Stan (Bind b) where
   sbst u es (K b) = K (sbst u es b)
   sbst u es (L b) = L (sbst (u + 1) es b)
 
-{-
-data Tel x
-  = TO x
-  | Tm :*: Bind (Tel x)
-  deriving Show
+instance Stan Tel where
+  stan ms (Ex s b)       = Ex (stan ms s) (stan ms b)
+  stan ms ((x, s) :*: t) = (x, stan ms s) :*: stan ms t
+  stan ms (Pr p)         = Pr (stan ms p)
+  sbst u es (Ex s b)       = Ex (sbst u es s) (sbst u es b)
+  sbst u es ((x, s) :*: t) = (x, sbst u es s) :*: sbst u es t
+  sbst u es (Pr p)         = Pr (sbst u es p)
 
-instance Thin x => Thin (Tel x) where
-  TO x <^> th = TO (x <^> th)
-  (s :*: t) <^> th = (s <^> th) :*: (t <^> th)
-  thicken th (TO x) = TO <$> thicken th x
-  thicken th (s :*: t) = (:*:) <$> thicken th s <*> thicken th t
+instance Stan Subgoal where
+  stan ms (PROVE g)   = PROVE (stan ms g)
+  stan ms (GIVEN h g) = GIVEN (stan ms h) (stan ms g)
+  sbst u es (PROVE g)   = PROVE (sbst u es g)
+  sbst u es (GIVEN h g) = GIVEN (sbst u es h) (sbst u es g)
 
-instance Stan x => Stan (Tel x) where
-  stan ms (TO x) = TO (stan ms x)
-  stan ms (s :*: t) = stan ms s :*: stan ms t
-  sbst u es (TO x) = TO (sbst u es x)
-  sbst u es (s :*: t) = sbst u es s :*: sbst u es t
--}
-
-instance Thin () where _ <^> _ = () ; thicken _ _ = Just ()
 instance Stan () where stan _ _ = () ; sbst _ _ _ = ()
 
-instance Thin Con where c <^> _ = c ; thicken _ c = Just c
-instance Stan Con where stan _ c = c ; sbst _ _ c = c
+
+------------------------------------------------------------------------------
+--  Metavariable dependency testing and topological insertion
+------------------------------------------------------------------------------
 
 class MDep t where
   mDep :: String -> t -> Bool
@@ -189,10 +248,9 @@ instance MDep b => MDep (Bind b) where
   mDep x (K t) = mDep x t
   mDep x (L t) = mDep x t
 
-topSort :: MDep t => [((String, t), z)] -> [((String, t), z)]
-topSort [] = []
-topSort (b : bs) = ins b (topSort bs) where
-  ins b [] = [b]
-  ins b@((x, _), _) (a@((_, t), _) : bs)
+topInsert :: MDep t =>
+  ((String, t), z) -> [((String, t), z)] -> [((String, t), z)]
+topInsert b [] = [b]
+topInsert b@((x, _), _) (a@((_, t), _) : bs)
     | mDep x t = b : a : bs
-    | otherwise = a : ins b bs
+    | otherwise = a : topInsert b bs

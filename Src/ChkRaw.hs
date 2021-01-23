@@ -4,7 +4,6 @@ module Ask.Src.ChkRaw where
 
 import Data.List
 import Data.Char
-import qualified Data.Map as M
 import Control.Arrow ((***))
 import Data.Bifoldable
 import Control.Applicative
@@ -18,7 +17,9 @@ import Ask.Src.Lexing
 import Ask.Src.RawAsk
 import Ask.Src.Tm
 import Ask.Src.Glueing
+import Ask.Src.Context
 import Ask.Src.Typing
+import Ask.Src.Proving
 import Ask.Src.Printing
 import Ask.Src.HardwiredRules
 
@@ -64,17 +65,17 @@ chkProof g m ps src = cope go junk return where
     (fmap subPassive ps) src
   go = case my g of
     Just gt -> do
-      (m, ss) <- case m of
-        Stub -> return $ (Stub, [])
-        By r -> (By *** id) <$> (gt `by` r)
+      m <- case m of
+        Stub -> pure Stub
+        By r -> By <$> (gt `by` r)
         From h@(_, (t, _, _) :$$ _) | elem t [Uid, Sym] -> do
-          h@(Our ht _) <- scoApplTm Prop h
-          (From h,) <$> ((TC "prove" [ht] :) <$> fromSubs gt ht)
+          h@(Our ht _) <- elabTm Prop h
+          demand (PROVE ht)
+          fromSubs gt ht
+          return (From h)
         From h -> gripe $ FromNeedsConnective h
-        MGiven -> do
-          given gt
-          return (MGiven, [])
-      ns <- chkSubProofs ss ps
+        MGiven -> MGiven <$ given gt
+      ns <- chkSubProofs ps
       let proven = case m of {Stub -> False; _ -> all happy ns}
       return $ Prove g m (Keep, proven) ns src
     Nothing -> return $ Prove g (fmap Your m) (Junk Mardiness, True)
@@ -90,32 +91,32 @@ happy _ = True
 -- and marking as surplus those subproofs which do
 -- not form part of the cover
 chkSubProofs
-  :: [Tm]                            -- subgoals expected from rule
-  -> Bloc (SubProve () Appl)         -- subproofs coming from user
+  :: Bloc (SubProve () Appl)         -- subproofs coming from user
   -> AM (Bloc (SubProve Anno TmR))   -- reconstruction
-chkSubProofs ss ps = do
+chkSubProofs ps = do
   ps <- traverse validSubProof ps
+  ss <- demands
   (qs, us) <- cover ss (fmap (False,) ps)
   vs <- extra us
   return $ glom (fmap squish qs) vs
  where
   cover
-    :: [Tm]  -- subgoals to cover
+    :: [Subgoal]  -- subgoals to cover
     -> Bloc (Bool, SubProve Anno TmR)  -- (used yet?, subproof)
     -> AM (Bloc (Bool, SubProve Anno TmR)  -- ditto
-          , [Tm]                          -- undischarged subgoals
+          , [Subgoal]                      -- undischarged subgoals
           )
   cover [] qs = return (qs, [])
   cover (t : ts) qs = cope (cover1 t qs)
     (\ _ -> cover ts qs >>= \ (qs, ts) -> return (qs, t : ts))
     $ cover ts
-  cover1 :: Tm -> Bloc (Bool, SubProve Anno TmR)
+  cover1 :: Subgoal -> Bloc (Bool, SubProve Anno TmR)
          -> AM (Bloc (Bool, SubProve Anno TmR))
   cover1 t (_ :-/ Stop) = gripe FAIL
   cover1 t (g :-/ (b, p) :-\ qs) = cope (covers t p)
     (\ _ -> ((g :-/) . ((b, p) :-\ )) <$> cover1 t qs)
     $ \ _ -> return $ (g :-/ (True, p) :-\ qs)
-  covers :: Tm -> SubProve Anno TmR -> AM ()
+  covers :: Subgoal -> SubProve Anno TmR -> AM ()
   covers t ((_, hs) ::- Prove g m (Keep, _) _ _) = subgoal t $ \ t -> do
     g <- mayhem $ my g
     traverse ensure hs
@@ -127,35 +128,34 @@ chkSubProofs ss ps = do
   squish (False, gs ::- Prove g m (Keep, _) ss src) =
     gs ::- Prove g m (Junk Surplus, True) ss src
   squish (_, q) = q
-  extra :: [Tm] -> AM [SubProve Anno TmR]
+  extra :: [Subgoal] -> AM [SubProve Anno TmR]
   extra [] = return []
   extra (u : us) = cope (subgoal u obvious)
     (\ _ -> (need u :) <$> extra us)
     $ \ _ -> extra us
   obvious s
     =   given s
-    <|> given (TC "False" [])
-    <|> equal Prop (s, TC "True" [])
-  need (TC "prove" [g]) =
+    <|> given FALSE
+    <|> equal Prop (s, TRUE)
+  need (PROVE g) =
     ([], []) ::- Prove (My g) Stub (Need, False)
       ([] :-/ Stop) ([], [])
-  need (TC "given" [h, u]) = case need u of
+  need (GIVEN h u) = case need u of
     (_, gs) ::- p -> ([], Given (My h) : gs) ::- p
     s -> s
   glom :: Bloc x -> [x] -> Bloc x
   glom (g :-/ p :-\ gps) = (g :-/) . (p :-\) . glom gps
   glom end = foldr (\ x xs -> [] :-/ x :-\ xs) end
 
-subgoal :: Tm -> (Tm -> AM x) -> AM x
-subgoal (TC "given" [h, g]) k = h |- subgoal g k
-subgoal (TC "prove" [g]) k = k g
-subgoal _ _ = gripe BadSubgoal
+subgoal :: Subgoal -> (Tm -> AM x) -> AM x
+subgoal (GIVEN h g) k = h |- subgoal g k
+subgoal (PROVE g) k = k g
 
 validSubProof
   :: SubProve () Appl
   -> AM (SubProve Anno TmR)
 validSubProof ((srg, Given h : gs) ::- p@(Prove sg sm () sps src)) =
-  cope (scoApplTm Prop h)
+  cope (elabTm Prop h)
     (\ gr -> return $ (srg, map (fmap Your) (Given h : gs)) ::-
       Prove (Your sg) (fmap Your sm) (Junk gr, True)
         (fmap subPassive sps) src)
@@ -163,7 +163,7 @@ validSubProof ((srg, Given h : gs) ::- p@(Prove sg sm () sps src)) =
       (srg, gs) ::- p <- ht |- validSubProof ((srg, gs) ::- p)
       return $ (srg, Given h : gs) ::- p
 validSubProof ((srg, []) ::- Prove sg sm () sps src) =
-  cope (scoApplTm Prop sg)
+  cope (elabTm Prop sg)
     (\ gr -> return $ (srg, []) ::- Prove  (Your sg) (fmap Your sm) (Junk gr, True)
       (fmap subPassive sps) src)
     $ \ sg -> ((srg, []) ::-) <$> chkProof sg sm sps src
@@ -173,18 +173,18 @@ validSubProof (SubPGuff ls) = return $ SubPGuff ls
 fromSubs
   :: Tm      -- goal
   -> Tm      -- fmla
-  -> AM [Tm]
+  -> AM ()
 fromSubs g f = map snd {- ignorant -} <$> invert f >>= \case
-  [[s]] -> return $ flop s g
-  rs -> return $ map (foldr wrangle (TC "prove" [g])) rs
+  [[s]] -> flop s g
+  rs -> mapM_ (demand . foldr (GIVEN . propify) (PROVE g)) rs
  where
-  flop (TC "prove" [p]) g = [TC "given" [p, TC "prove" [g]]]
-  flop (TC "given" [h, s]) g = TC "prove" [h] : flop s g
-  flop _ _ = [TC "prove" [g]] -- should not happen
-  wrangle p g = TC "given" [wangle p, g]
-  wangle (TC "given" [s, t]) = TC "->" [s, wangle t]
-  wangle (TC "prove" [p]) = p
-  wangle _ = TC "True" []
+  flop (PROVE p)   g = demand . GIVEN p $ PROVE g
+  flop (GIVEN h s) g = do
+    demand $ PROVE h
+    flop s g
+  propify (GIVEN s t) = s :-> propify t
+  propify (PROVE p)   = p
+
 
 {-
 testChkProof :: String -> [Prove Anno TmR]
@@ -332,7 +332,7 @@ filth s = bifoldMap (($ "") . rfold lout) yuk (raw (fixities mySetup) s) where
    where
     go :: AM String
     go = do
-      g <- applScoTm (TC "Prop" []) gr
+      g <- impQElabTm Prop gr
       bifoldMap id (($ "") . rfold lout) <$> 
            (chkProof g mr ps src >>= pout (Denty 1))
   yuk (RawSewage, ls) = "{- don't ask\n" ++ rfold lout ls "\n-}"

@@ -9,7 +9,7 @@ import Ask.Src.Lexing
 import Ask.Src.RawAsk
 import Ask.Src.Tm
 import Ask.Src.Glueing
-import Ask.Src.Typing
+import Ask.Src.Context
 
 data Spot = AllOK | RadSpot | Infix (Int, Either Assocy Assocy) | Fun | Arg deriving (Show, Eq)
 data Wot = Rad | Inf (Int, Assocy) | App deriving (Show, Eq)
@@ -25,11 +25,7 @@ instance Ord Wot where
   -- x <= y means you can put a y anywhere you can put an x with no parens
 
 pinx :: Int -> AM String
-pinx i = go i <$> gamma where
-  go i B0 = "???" ++ show i
-  go 0 (ga :< Var x) = x
-  go i (ga :< Var _) = go (i - 1) ga
-  go i (ga :< _)     = go i       ga
+pinx i = return $ "???"
 
 pnom :: Nom -> AM String
 pnom x = cope (nomBKind x) (\ gr -> return (show x)) $ \case
@@ -107,7 +103,6 @@ ppGripe (NotGiven p) = do
 ppGripe (NotARule (ls, _)) = return $ rfold lout ls " is not the right shape to be a rule."
 ppGripe Mardiness = return $
   "I seem to be unhappy but I can't articulate why, except that it's Conor's fault."
-ppGripe BadSubgoal = return "Please report a bug: I have found a badly structured subgoal."
 ppGripe (WrongNumOfArgs c n as) = return $
   c ++ " expects " ++ count n ++ " but you have given it " ++ blat as
   where

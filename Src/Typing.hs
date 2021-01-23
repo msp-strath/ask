@@ -1,13 +1,22 @@
-{-# LANGUAGE CPP, TupleSections, LambdaCase, PatternSynonyms,
-    TypeSynonymInstances, FlexibleInstances #-}
+------------------------------------------------------------------------------
+----------                                                          ----------
+----------     Ask.Src.Typing                                       ----------
+----------                                                          ----------
+------------------------------------------------------------------------------
+
+{-# LANGUAGE
+    TupleSections
+  , LambdaCase
+  , PatternSynonyms
+  , TypeSynonymInstances
+  , FlexibleInstances #-}
+  
 module Ask.Src.Typing where
 
-import Data.List
-import Control.Monad
-import qualified Control.Monad.Fail as Fail
+--import Data.List
 import Control.Applicative
-import qualified Data.Map as M
 import Data.Foldable
+import Control.Monad
 import Control.Arrow ((***))
 
 import Debug.Trace
@@ -20,101 +29,14 @@ import Ask.Src.Lexing
 import Ask.Src.RawAsk
 import Ask.Src.Tm
 import Ask.Src.Glueing
+import Ask.Src.Context
 
 track = const id
 
-type Context = Bwd CxE
 
-data CxE -- what sort of thing is in the context?
-  = Hyp Tm
-  | Var String  -- dear god no, fix this to be locally nameless
-  | Bind (Nom, Hide Tm) BKind
-  | ImplicitQuantifier
-  | (Con, [Pat]) ::> (Con, [(String, Tm)])
-  | ByRule Bool{- pukka intro?-} Rule
-  deriving (Show, Eq) -- get rid of that Eq!
-
-data Rule =
-  (Pat, (Con, [(String, Tm)])) :<=
-  [ Tm
-  ]
-  deriving (Show, Eq)
-
-data BKind
-  = User String
-  | Defn Tm
-  | Hole
-  deriving (Show, Eq)
-
-data Gripe
-  = Surplus
-  | Scope String
-  | ByBadRule String Tm
-  | ByAmbiguous String Tm
-  | FromNeedsConnective Appl
-  | NotGiven Tm
-  | NotEqual
-  | NotARule Appl
-  | Mardiness
-  | BadSubgoal
-  | WrongNumOfArgs Con Int [Appl]
-  | DoesNotMake Con Tm
-  | OverOverload Con
-  | FAIL
-  deriving Show
-
-type Root = (Bwd (String, Int), Int)
-
-data AM x = AM {runAM
-  :: Setup     -- rules and stuff
-  -> AskState  -- vars and hyps
-  -> Either Gripe (x, AskState)}
-
-data AskState = AskState
-  { context :: Context
-  , root    :: Root
-  } deriving Show
-
-instance Monad AM where
-  return x    = AM $ \ _ as -> Right (x, as)
-  AM f >>= k = AM $ \ setup as -> case f setup as of
-    Left g -> Left g
-    Right (x, as) -> runAM (k x) setup as
-#if !(MIN_VERSION_base(4,13,0))
-  -- Monad(fail) will be removed in GHC 8.8+
-  fail = Fail.fail
-#endif
-instance Applicative AM where pure = return; (<*>) = ap
-instance Functor AM where fmap = ap . return
-
-instance Fail.MonadFail AM where
-  fail _ = AM $ \ _ _ -> Left FAIL
-
-gripe :: Gripe -> AM x
-gripe g = AM $ \ _ _ -> Left g
-
-mayhem :: Maybe x -> AM x
-mayhem mx = do
-  Just x <- return mx
-  return x
-
-cope :: AM x -> (Gripe -> AM y) -> (x -> AM y) -> AM y
-cope (AM f) yuk wow = AM $ \ setup as -> case f setup as of
-  Left g        -> runAM (yuk g) setup as
-  Right (x, as) -> runAM (wow x) setup as
-
-instance Alternative AM where
-  empty = gripe FAIL
-  ma <|> mb = cope ma (const mb) return
-
-data Setup = Setup
-  { fixities   :: FixityTable
-  } deriving Show
-
-fixity :: String -> AM (Int, Assocy)
-fixity o = AM $ \ s as -> Right . (, as) $ case M.lookup o (fixities s) of
-  Nothing -> (9, LAsso)
-  Just x  -> x
+------------------------------------------------------------------------------
+--  Head normalisation
+------------------------------------------------------------------------------
 
 hnf :: Tm -> AM Tm
 hnf t = case t of
@@ -142,6 +64,11 @@ hnfSyn (f :$ s) = hnfSyn f >>= \case
 equal :: Tm -> (Tm, Tm) -> AM ()
 equal ty (x, y) = guard $ x == y -- not for long
 
+
+------------------------------------------------------------------------------
+--  Pattern Matching
+------------------------------------------------------------------------------
+
 maAM :: (Pat, Tm) -> AM Matching
 maAM (p, t) = go mempty (p, t) where
   go :: Thinning -> (Pat, Tm) -> AM Matching
@@ -156,170 +83,133 @@ maAM (p, t) = go mempty (p, t) where
     TB (L t) -> go (os ph) (p, t)
     _ -> gripe FAIL
 
-by :: Tm -> Appl -> AM (TmR, [Tm])
-by goal a@(_, (t, _, s) :$$ _) | elem t [Uid, Sym] = do
-  subses <- fold <$> (gamma >>= traverse (backchain a))
-  case subses of
-    [subs] -> return subs
-    []     -> gripe $ ByBadRule s goal
-    _      -> gripe $ ByAmbiguous s goal
- where
-  backchain :: Appl -> CxE -> AM [(TmR, [Tm])] -- list of successes
-  backchain a@(_, (_, _, r) :$$ ss) (ByRule _ ((gop, (h, ps)) :<= prems)) | h == r = cope (do
-    let tmpl = TC r [TM x [] | (x, _) <- ps]
-    m <- maAM (gop, goal)
-    bs <- mayhem $ topSort <$> halfZip ps ss
-    m <- argChk m bs
-    return [(Our (stan m tmpl) a, stan m prems)]
-    )
-    (\ _ -> return [])
-    return
-  backchain _ _ = return []
-by goal r = gripe $ NotARule r
 
-argChk :: Matching -> [((String, Tm), Appl)] -> AM Matching
-argChk m [] = return m
-argChk m (((x, t), a) : bs) = do
-  a@(Our s _) <- scoApplTm (stan m t) a
-  argChk ((x, s) : m) bs
+------------------------------------------------------------------------------
+--  Elaboration
+------------------------------------------------------------------------------
 
-invert :: Tm -> AM [((String, [(String, Tm)]), [Tm])]
-invert hyp = fold <$> (gamma >>= traverse try )
- where
-  try :: CxE -> AM [((String, [(String, Tm)]), [Tm])]
-  try (ByRule True ((gop, vok) :<= prems)) = cope (maAM (gop, hyp))
-    (\ _ -> return [])
-    (\ m -> return [((id *** map (id *** stan m)) vok, stan m prems)])
-  try _ = return []
-
-gamma :: AM Context
-gamma = AM $ \ setup as -> Right (context as, as)
-
-setGamma :: Context -> AM ()
-setGamma ga = AM $ \ setup as -> Right ((), as {context = ga})
-
-fresh :: String -> AM Nom
-fresh x = AM $ \ setup as -> case root as of
-  (roo, non) -> Right (roo <>> [(x, non)], as {root = (roo, non + 1)})
-
-push :: CxE -> AM ()
-push z = AM $ \ setup as -> Right ((), as {context = context as :< z})
-
-pop :: (CxE -> Bool) -> AM (Maybe CxE)
-pop test = do
-  ga <- gamma
-  case go ga of
-    Nothing      -> return Nothing
-    Just (ga, z) -> setGamma ga >> return (Just z)
- where
-  go B0 = Nothing
-  go (ga :< z)
-    | test z    = Just (ga, z)
-    | otherwise = go ga >>= \ (ga, y) -> Just (ga :< z, y)
-
-what's :: String -> AM Syn
-what's x = do
-  ga <- gamma
-  (e, mga) <- go ga
-  case mga of
-    Nothing -> return ()
-    Just ga -> setGamma ga
-  return e
- where
-  go :: Context -> AM (Syn, Maybe Context)
-  go B0 = gripe (Scope x)
-  go (_ :< Bind p (User y)) | x == y = return (TP p, Nothing)
-  go ga@(_ :< ImplicitQuantifier) = do
-    xTp <- (, Hide Type) <$> fresh "Ty"
-    xp  <- (, Hide (TE (TP xTp)))  <$> fresh x
-    return (TP xp, Just (ga :< Bind xTp Hole :< Bind xp (User x)))
-  go (ga :< z) = do
-    (e, mga) <- go ga
-    return (e, (:< z) <$> mga)
-
-given :: Tm -> AM ()
-given goal = gamma >>= go where
-  go B0 = gripe $ NotGiven goal
-  go (ga :< Hyp hyp) = cope (equal (TC "Prop" []) (hyp, goal))
-    (\ gr -> go ga) return
-  go (ga :< _) = go ga
-
-(|-) :: Tm -> AM x -> AM x
-h |- p = do
-  push (Hyp h)
-  x <- p
+impQElabTm :: Tm -> Appl -> AM TmR
+impQElabTm ty a = do
+  push ImplicitQuantifier
+  t <- elabTm ty a
   pop $ \case
-    Hyp _ -> True
+    ImplicitQuantifier -> True
     _ -> False
-  return x
+  return t
 
-scoApplTm :: Tm -> Appl -> AM TmR
-scoApplTm ty a@(_, t) = ((`Our` a)) <$> go t
+elabTm :: Tm -> Appl -> AM TmR
+elabTm ty a@(_, t) = ((`Our` a)) <$> go t
   where
     go :: Appl' -> AM Tm
     go ((t, _, y) :$$ ras) = case t of
       Lid -> do
-        (e, sy) <- synApps y ras
+        (e, sy) <- elabSyn y ras
         subtype sy ty
         return $ TE e
       _   -> do
-        TC d ss <- hnf ty
-        (fold <$> (gamma >>= traverse (try d ss y))) >>= \case
-          [] -> gripe (DoesNotMake y ty)
-          _ : _ : _ -> gripe (OverOverload y)
-          [(m, as)] -> do
-            let tmpl = TC y [TM x [] | (x, _) <- as]
-            bs <- cope (mayhem $ topSort <$> halfZip as ras)
-                    (\ _ -> gripe (WrongNumOfArgs y (length as) ras))
-                    return
-            m <- argChk m bs
-            return $ stan m tmpl
-    try :: Con -> [Tm] -> Con -> CxE -> AM [(Matching, [(String, Tm)])]
-    try d ss c ((d', ps) ::> (c', as)) | d == d' && c == c' = do
-      m <- concat <$> ((mayhem $ halfZip ps ss) >>= traverse maAM)
-      return [(m, as)]
-    try _ _ _ _ = return []
+        tel <- constructor ty y
+        elabTel y tel ras
 
-synApps :: String -> [Appl] -> AM (Syn, Tm)
-synApps f as = do
+elabTel :: String -> Tel -> [Appl] -> AM Tm
+elabTel con tel as = do
+  (ss, sch, po) <- cope (specialise tel as)
+    (\ _ -> gripe (WrongNumOfArgs con (ari tel) as))
+    return
+  m <- argChk [] sch
+  demand (PROVE po)
+  return . stan m $ TC con ss
+ where
+  specialise :: Tel -> [Appl] -> AM ([Tm], [((String, Tm), Appl)], Tm)
+  specialise (Ex s b) as = do
+    x <- hole s
+    (ts, sch, po) <- specialise (b // x) as
+    return (TE x : ts, sch, po)
+  specialise ((x, s) :*: tel) (a : as) = do
+    (ts, sch, po) <- specialise tel as
+    return (TM x [] : ts, topInsert ((x, s), a) sch, po)
+  specialise (Pr po) [] = return ([], [], po)
+  specialise _ _ = gripe FAIL
+  ari :: Tel -> Int
+  ari (Ex s (K b)) = ari b
+  ari (Ex s (L b)) = ari b
+  ari (s :*: tel)  = 1 + ari tel
+  ari (Pr _)       = 0
+
+argChk :: Matching -> [((String, Tm), Appl)] -> AM Matching
+argChk m [] = return m
+argChk m (((x, t), a) : bs) = do
+  a@(Our s _) <- elabTm (stan m t) a
+  argChk ((x, s) : m) bs
+
+elabSyn :: String -> [Appl] -> AM (Syn, Tm)
+elabSyn f as = do
   f@(TP (_, Hide t)) <- what's f
-  spinalApp (f, t) as
+  elabSpine (f, t) as
 
-spinalApp :: (Syn, Tm) -> [Appl] -> AM (Syn, Tm)
-spinalApp fsy [] = return fsy
-spinalApp (f, sy) (a : as) = do
+elabSpine :: (Syn, Tm) -> [Appl] -> AM (Syn, Tm)
+elabSpine fsy [] = return fsy
+elabSpine (f, sy) (a : as) = do
   (dom, ran) <- makeFun sy
-  Our s _ <- scoApplTm dom a
-  spinalApp (f :$ s, ran) as
+  Our s _ <- elabTm dom a
+  elabSpine (f :$ s, ran) as
+
+
+------------------------------------------------------------------------------
+--  Subtyping
+------------------------------------------------------------------------------
+
+subtype :: Tm -> Tm -> AM ()
+subtype got want = unify Type got want  -- not gonna last
 
 makeFun :: Tm -> AM (Tm, Tm)
 makeFun (TC "->" [dom, ran]) = return (dom, ran)
-makeFun _ = gripe FAIL -- could do better
+makeFun ty = do
+  dom <- TE <$> hole Type
+  ran <- TE <$> hole Type
+  unify Type (dom :-> ran) ty
+  return (dom, ran)
 
-subtype :: Tm -> Tm -> AM ()
-subtype got want = unify (got, want)
 
-unify :: (Tm, Tm) -> AM ()
-unify (a, b) = do
+------------------------------------------------------------------------------
+--  Unification
+------------------------------------------------------------------------------
+
+unify :: Tm -> Tm -> Tm -> AM ()
+unify ty a b = do  -- pay more attention to types
   a <- hnf a
   b <- hnf b
   True <- track (show a ++ " =? " ++ show b) (return True)
   case (a, b) of
     (TC f as, TC g bs) -> do
       guard $ f == g
-      abs <- mayhem $ halfZip as bs
-      traverse unify abs
-      return ()
-    (TE (TP (x, _)), t) -> make x t
-    (s, TE (TP (y, _))) -> make y s
+      tel <- constructor ty f
+      unifies tel as bs
+    (TE (TP xp), t) -> make xp t
+    (s, TE (TP yp)) -> make yp s
     _ -> gripe FAIL
 
-make :: Nom -> Tm -> AM ()
-make x (TE (TP (y, _))) | x == y = return ()
-make x t = do
+unifies :: Tel -> [Tm] -> [Tm] -> AM ()
+unifies tel as bs = prepare tel as bs >>= execute [] where
+  prepare :: Tel -> [Tm] -> [Tm] -> AM [((String, Tm), (Tm, Tm))]
+  prepare (Pr _) [] [] = return []
+  prepare (Ex s mo) (a : as) (b : bs) = do
+    unify s a b
+    prepare (mo // (a ::: s)) as bs
+  prepare (xs :*: tel) (a : as) (b : bs) = do
+    sch <- prepare tel as bs
+    return $ topInsert (xs, (a, b)) sch
+  execute :: Matching -> [((String, Tm), (Tm, Tm))] -> AM ()
+  execute m [] = return ()
+  execute m (((x, s), (a, b)) : sch) = do
+    unify (stan m s) a b
+    execute ((x, a) : m) sch
+
+make :: (Nom, Hide Tm) -> Tm -> AM ()
+make (x, _) (TE (TP (y, _))) | x == y = return ()
+make (x, Hide ty) t = do
   nomBKind x >>= \case
     User _ -> gripe FAIL
-    Defn s -> unify (s, t)
+    Defn s -> unify ty s t
     Hole -> do
       ga <- gamma
       ga <- go ga []
@@ -338,6 +228,11 @@ make x t = do
         User _ -> gripe FAIL
         _ -> go ga (z : ms)
   go (ga :< z) ms = (:< z) <$> go ga ms
+
+
+------------------------------------------------------------------------------
+--  Occur Check
+------------------------------------------------------------------------------
 
 class PDep t where
   pDep :: Nom -> t -> AM Bool
@@ -374,29 +269,24 @@ instance PDep BKind where
   pDep x (Defn t) = pDep x t
   pDep _ _ = return False
 
--- currently a knock-off, this checks that rules are good for props
-scoApplRu :: Tm -> Appl -> AM TmR
-scoApplRu ty a@(_, t) = ((`Our` a)) <$> go t
-  where
-    go :: Appl' -> AM Tm
-    go ((t, _, y) :$$ ras) = case t of
-      Lid -> TE <$> (foldl (:$) <$> what's y <*> as)
-      _   -> TC y <$> as
-      where as = traverse (go . snd) ras
 
-applScoTm :: Tm -> Appl -> AM TmR
-applScoTm ty a = do
-  push ImplicitQuantifier
-  t <- scoApplTm ty a
-  pop $ \case
-    ImplicitQuantifier -> True
-    _ -> False
-  return t
+------------------------------------------------------------------------------
+--  Constructor lookup
+------------------------------------------------------------------------------
 
-nomBKind :: Nom -> AM BKind
-nomBKind x = gamma >>= foldl me empty where
-  me no (Bind (y, _) bk) | x == y = return bk
-  me no _ = no
-
-pattern Type = TC "Type" []
-pattern Prop = TC "Prop" []
+constructor :: Tm -> Con -> AM Tel
+constructor ty con = do
+  (d, ss) <- hnf ty >>= \case
+    TC d ss -> return (d, ss)
+    _ -> gripe (NonCanonicalType ty con)
+  (fold <$> (gamma >>= traverse (try d ss con))) >>= \case
+    [] -> gripe (DoesNotMake con ty)
+    _ : _ : _ -> gripe (OverOverload con)
+    [tel] -> return tel
+ where
+  try :: Con -> [Tm] -> Con -> CxE -> AM [Tel]
+  try d ss c ((d', ps) ::> (c', tel)) | d == d' && c == c' = do
+    m <- concat <$> ((mayhem $ halfZip ps ss) >>= traverse maAM)
+    return [stan m tel]
+  try _ _ _ _ = return []
+  
