@@ -185,18 +185,6 @@ fromSubs g f = map snd {- ignorant -} <$> invert f >>= \case
   propify (GIVEN s t) = s :-> propify t
   propify (PROVE p)   = p
 
-
-{-
-testChkProof :: String -> [Prove Anno TmR]
-testChkProof = foldMap (bof . fst) . raw (fixities mySetup) where
-  bof (RawProof (Prove gr mr () ps src)) = case runAM (chkProof g mr ps src) mySetup ga of
-    Right p -> [p]
-    Left _  -> []
-   where
-    (ga, g) = applScoTm gr
-  bof _ = []
--}
-
 pout :: LayKind -> Prove Anno TmR -> AM (Odd String [LexL])
 pout k p@(Prove g m (s, n) ps (h, b)) = let k' = scavenge b in case s of
   Keep -> do
@@ -321,22 +309,27 @@ pout k p@(Prove g m (s, n) ps (h, b)) = let k' = scavenge b in case s of
      clos ls = (Sym, (0,0), "}") :ls
      sepa ls = (Sym, (0,0), ";") : ls ++ [(Spc, (0,0), " ")]
 
+askRawDecl :: (RawDecl, [LexL]) -> AM String
+askRawDecl (RawProof (Prove gr mr () ps src), ls) = cope (do
+    g <- impQElabTm Prop gr
+    bifoldMap id (($ "") . rfold lout) <$> 
+      (chkProof g mr ps src >>= pout (Denty 1)))
+  (\ gr -> do
+    e <- ppGripe gr
+    return $ "{- " ++ e ++ "\n" ++ rfold lout ls "\n-}")
+  return
+askRawDecl (RawSewage, ls) = return $ "{- don't ask\n" ++ rfold lout ls "\n-}"
+askRawDecl (_, ls) = return $ rfold lout ls ""
+
 filth :: String -> String
-filth s = bifoldMap (($ "") . rfold lout) yuk (raw (fixities mySetup) s) where
-  yuk (RawProof (Prove gr mr () ps src), ls) = case runAM go mySetup init of
-    Left e -> case runAM (ppGripe e) mySetup init of
-      Left _ -> "{- " ++ show e ++ "\n" ++ rfold lout ls "\n-}"
-      Right (e, _) ->
-         "{- " ++ e ++ "\n" ++ rfold lout ls "\n-}"
-    Right (s, _) -> s
-   where
-    go :: AM String
-    go = do
-      g <- impQElabTm Prop gr
-      bifoldMap id (($ "") . rfold lout) <$> 
-           (chkProof g mr ps src >>= pout (Denty 1))
-  yuk (RawSewage, ls) = "{- don't ask\n" ++ rfold lout ls "\n-}"
-  yuk (_, ls) = rfold lout ls ""
+filth s = case runAM go mySetup init of
+  Left e -> "OH NO! " ++ show e
+  Right (s, _) -> s
+ where
+  go :: AM String
+  go = do
+    ftab <- fixities <$> setup
+    bifoldMap (($ "") . rfold lout) id <$> traverse askRawDecl (raw ftab s)
   init :: AskState
   init = AskState
     { context = myContext
