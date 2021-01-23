@@ -108,16 +108,16 @@ elabTm ty a@(_, t) = ((`Our` a)) <$> go t
         return $ TE e
       _   -> do
         tel <- constructor ty y
-        elabTel y tel ras
+        fst <$> elabTel y tel ras
 
-elabTel :: String -> Tel -> [Appl] -> AM Tm
+elabTel :: String -> Tel -> [Appl] -> AM (Tm, Matching)
 elabTel con tel as = do
   (ss, sch, po) <- cope (specialise tel as)
     (\ _ -> gripe (WrongNumOfArgs con (ari tel) as))
     return
   m <- argChk [] sch
   demand (PROVE po)
-  return . stan m $ TC con ss
+  return (stan m $ TC con ss, m)
  where
   specialise :: Tel -> [Appl] -> AM ([Tm], [((String, Tm), Appl)], Tm)
   specialise (Ex s b) as = do

@@ -21,22 +21,25 @@ import Ask.Src.Context
 import Ask.Src.Typing
 
 by :: Tm -> Appl -> AM TmR
-by goal a@(_, (t, _, s) :$$ _) | elem t [Uid, Sym] = do
-  subses <- fold <$> (gamma >>= traverse (backchain a))
+by goal a@(_, (t, _, r) :$$ ss) | elem t [Uid, Sym] = do
+  subses <- fold <$> (gamma >>= traverse backchain)
   case subses of
-    [(t, subs)] -> do
-      mapM_ demand subs
-      return t
-    []     -> gripe $ ByBadRule s goal
-    _      -> gripe $ ByAmbiguous s goal
+    [(tel, subs)] -> do
+      (t, m) <- elabTel r tel ss
+      mapM_ demand (stan m subs)
+      return $ Our t a
+    []     -> gripe $ ByBadRule r goal
+    _      -> gripe $ ByAmbiguous r goal
  where
-  backchain :: Appl -> CxE -> AM [(TmR, [Subgoal])] -- list of successes
-  backchain a@(_, (_, _, r) :$$ ss) (ByRule _ ((gop, (h, tel)) :<= prems))
-    | h == r = do
-    m <- maAM (gop, goal)
-    cope ((`Our` a) <$> elabTel h (stan m tel) ss) (\ _ -> return []) $ \ t ->
-      return [(t, stan m prems)]
-  backchain _ _ = return []
+  backchain :: CxE -> AM [(Tel, [Subgoal])] -- list of successes
+  backchain (ByRule _ ((gop, (h, tel)) :<= prems))
+    | h == r = 
+    cope (do
+      m <- maAM (gop, goal)
+      return [(stan m tel, stan m prems)])
+      (\ _ -> return [])
+      return
+  backchain _ = return []
 by goal r = gripe $ NotARule r
 
 invert :: Tm -> AM [((String, Tel), [Subgoal])]
