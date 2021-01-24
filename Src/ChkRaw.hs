@@ -442,6 +442,7 @@ askRawDecl (RawData tcon vcons, ls) = cope (chkData tcon vcons)
     e <- ppGripe gr
     return $ "{- " ++ e ++ "\n" ++ rfold lout ls "\n-}")
   (\ _ -> return $ rfold lout ls "")
+askRawDecl (RawSewage, []) = return ""
 askRawDecl (RawSewage, ls) = return $ "{- don't ask\n" ++ rfold lout ls "\n-}"
 askRawDecl (_, ls) = return $ rfold lout ls ""
 

@@ -306,8 +306,11 @@ layLines g ls = case gimme g False ls of
 
 lexPhase1 :: [Lex0] -> Bloc Line
 lexPhase1 ls = case span gappy ls of
-  (ss, ls) -> case layLines (Indenting "" 1) ls of
-    (e, _) -> map lex0 ss :-/ e
+  (ss, ls) -> map lex0 ss :-/ uncurry trailing (layLines (Indenting "" 1) ls)
+ where
+  trailing Stop               rs = [] :-\ map lex0 rs :-/ Stop
+  trailing (a :-\ b :-/ Stop) rs = (a :-\ (b ++ map lex0 rs) :-/ Stop)
+  trailing (a :-\ b :-/ e)    rs = a :-\ b :-/ trailing e rs
 
 brackety :: [LexL] -> [LexL]
 brackety = go B0 B0 where
