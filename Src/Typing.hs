@@ -103,6 +103,7 @@ elabTmR :: Tm -> Appl -> AM TmR
 elabTmR ty a = ((`Our` a)) <$> elabTm ty a
 
 elabTm :: Tm -> Appl -> AM Tm
+elabTm ty (_, a) | track (show ty ++ " on " ++ show a) False = undefined
 elabTm ty (_, (t, _, y) :$$ ras) = case t of
   Lid -> do
     (e, sy) <- elabSyn y ras
@@ -319,6 +320,7 @@ telify vs lox = go vs [] lox where
     User x -> do
       tel <- go vs ((x, (xp, ty)) : ps) lox
       return $ e4p (xp, TM x [] ::: ty) tel
+  go vs ps ((_ ::> _) : lox) = go vs ps lox
   go _ _ _ = gripe FAIL
     
     

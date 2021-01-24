@@ -27,7 +27,7 @@ import Ask.Src.Proving
 import Ask.Src.Printing
 import Ask.Src.HardwiredRules
 
-tracy = trace
+tracy = const id
 
 type Anno =
   ( Status
@@ -321,8 +321,8 @@ noDuplicate ty con = cope (constructor ty con)
 
 chkProp :: Appl -> Bloc RawIntro -> AM ()
 chkProp (ls, (t, _, rel) :$$ as) intros | elem t [Uid, Sym]  = do
-  doorStop
   noDuplicate Prop rel
+  doorStop
   tel <- elabTel as
   pushOutDoor $ ("Prop", []) ::> (rel, tel)
   (rus, cxs) <- fold <$> traverse (chkIntro tel) intros
@@ -373,6 +373,47 @@ patify (TE (TP (xp, Hide ty))) = do
   return (PM x mempty, [(xp, TM x [] ::: ty)])
 patify _ = gripe FAIL
 
+chkData :: Appl -> [Appl] -> AM ()
+chkData (_, (t, _, tcon) :$$ as) vcons | elem t [Uid, Sym] = do
+  noDuplicate Type tcon
+  doorStop
+  (vs, _) <- bindParam as
+  fake <- gamma >>= (`fakeTel` Pr TRUE)
+  push $ ("Type", []) ::> (tcon, fake)
+  cts <- traverse chkCon vcons
+  guard $ nodup (map fst cts)
+  lox <- doorStep
+  real <- telify vs lox
+  push $ ("Type", []) ::> (tcon , real)
+  (ps, sb) <- mkPatsSubs 0 lox
+  for cts $ \ (c, tel) ->
+    push $ (tcon, ps) ::> (c, rfold e4p sb tel)
+  return ()
+ where
+  fakeTel :: Context -> Tel -> AM Tel
+  fakeTel B0 tel = return tel -- not gonna happen because...
+  fakeTel (ga :< DoorStop) tel = return tel -- ...this prevents it
+  fakeTel (ga :< Bind (_, Hide ty) (User x)) tel =
+    fakeTel ga ((x, ty) :*: tel)
+  fakeTel (ga :< _) tel = fakeTel ga tel
+  chkCon :: Appl -> AM (String, Tel)
+  chkCon (_, (t, _, vcon) :$$ as) | elem t [Uid, Sym] = do
+    vtel <- elabTel as
+    return (vcon, vtel)
+  chkCon _ = gripe FAIL
+  mkPatsSubs :: Int -> [CxE] -> AM ([Pat], [(Nom, Syn)])
+  mkPatsSubs _ [] = return ([], [])
+  mkPatsSubs i (Bind (xp, Hide ty) bk : lox) = case bk of
+    Hole -> let x = '%' : show i in
+      ((PM x mempty :) *** ((xp, TM x [] ::: ty) :)) <$> mkPatsSubs (i + 1) lox
+    Defn t ->
+      (id *** ((xp, t ::: ty) :)) <$> mkPatsSubs i lox
+    User x ->
+       ((PM x mempty :) *** ((xp, TM x [] ::: ty) :)) <$> mkPatsSubs (i + 1) lox
+  mkPatsSubs i (_ : lox) = mkPatsSubs i lox
+
+chkData _ _ = gripe FAIL
+
 askRawDecl :: (RawDecl, [LexL]) -> AM String
 askRawDecl (RawProof (Prove gr mr () ps src), ls) = id
   <$ doorStop
@@ -386,6 +427,11 @@ askRawDecl (RawProof (Prove gr mr () ps src), ls) = id
     return
   <* doorStep
 askRawDecl (RawProp tmpl intros, ls) = cope (chkProp tmpl intros)
+  (\ gr -> do
+    e <- ppGripe gr
+    return $ "{- " ++ e ++ "\n" ++ rfold lout ls "\n-}")
+  (\ _ -> return $ rfold lout ls "")
+askRawDecl (RawData tcon vcons, ls) = cope (chkData tcon vcons)
   (\ gr -> do
     e <- ppGripe gr
     return $ "{- " ++ e ++ "\n" ++ rfold lout ls "\n-}")

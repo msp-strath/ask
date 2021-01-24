@@ -21,6 +21,7 @@ myFixities = M.fromList
 
 myPreamble :: Context
 myPreamble = B0
+  :< (("Type", []) ::> ("Type", Pr TRUE))   -- boo! hiss!
   :< (("Type", []) ::> ("Prop", Pr TRUE))
   :< (("Prop", []) ::> ("->", ("s", Prop) :*: ("t", Prop) :*: Pr TRUE))
   :< (("Prop", []) ::> ("&", ("s", Prop) :*: ("t", Prop) :*: Pr TRUE))

@@ -31,7 +31,7 @@ data RawDecl
   | RawSewage
   | RawFixity FixityTable
   | RawProp Appl (Bloc RawIntro)
-  | RawData Appl ([Appl])
+  | RawData Appl [Appl]
   | RawProof (Prove () Appl)
   deriving Show
   
