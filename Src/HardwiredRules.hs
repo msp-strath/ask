@@ -29,6 +29,9 @@ myPreamble = B0
   :< (("Prop", []) ::> ("Not", ("s", Prop) :*: Pr TRUE))
   :< (("Prop", []) ::> ("False", Pr TRUE))
   :< (("Prop", []) ::> ("True", Pr TRUE))
+  :< (("Prop", []) ::> ("=", Ex Type . L . Ex Type . L $
+                        ("x", TE (TV 1)) :*: ("y", TE (TV 0)) :*:
+                        Pr (TC "=" [Type, Type, TE (TV 1), TE (TV 0)])))
 
 myIntroRules :: [Rule]
 myIntroRules =

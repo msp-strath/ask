@@ -141,6 +141,12 @@ chkSubProofs ps = do
     =   given s
     <|> given FALSE
     <|> equal Prop (s, TRUE)
+    <|> case s of
+          TC "=" [_X, _Y, x, y] -> do
+            equal Type (_X, _Y)
+            equal _X (x, y)
+          _ -> gripe FAIL
+            
   need (PROVE g) =
     ([], []) ::- Prove (My g) Stub (Need, False)
       ([] :-/ Stop) ([], [])
