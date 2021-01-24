@@ -7,9 +7,13 @@ import Data.Char
 import Control.Arrow ((***))
 import Data.Bifoldable
 import Control.Applicative
+import Data.Traversable
+import Control.Monad
+import Data.Foldable
 
 import Debug.Trace
 
+import Ask.Src.Hide
 import Ask.Src.Thin
 import Ask.Src.Bwd
 import Ask.Src.OddEven
@@ -69,10 +73,10 @@ chkProof g m ps src = cope go junk return where
         Stub -> pure Stub
         By r -> By <$> (gt `by` r)
         From h@(_, (t, _, _) :$$ _) | elem t [Uid, Sym] -> do
-          h@(Our ht _) <- elabTm Prop h
+          ht <- elabTm Prop h
           demand (PROVE ht)
           fromSubs gt ht
-          return (From h)
+          return (From (Our ht h))
         From h -> gripe $ FromNeedsConnective h
         MGiven -> MGiven <$ given gt
       ns <- chkSubProofs ps
@@ -159,11 +163,11 @@ validSubProof ((srg, Given h : gs) ::- p@(Prove sg sm () sps src)) =
     (\ gr -> return $ (srg, map (fmap Your) (Given h : gs)) ::-
       Prove (Your sg) (fmap Your sm) (Junk gr, True)
         (fmap subPassive sps) src)
-    $ \ h@(Our ht _) -> do
+    $ \ ht -> do
       (srg, gs) ::- p <- ht |- validSubProof ((srg, gs) ::- p)
-      return $ (srg, Given h : gs) ::- p
+      return $ (srg, Given (Our ht h) : gs) ::- p
 validSubProof ((srg, []) ::- Prove sg sm () sps src) =
-  cope (elabTm Prop sg)
+  cope (elabTmR Prop sg)
     (\ gr -> return $ (srg, []) ::- Prove  (Your sg) (fmap Your sm) (Junk gr, True)
       (fmap subPassive sps) src)
     $ \ sg -> ((srg, []) ::-) <$> chkProof sg sm sps src
@@ -309,15 +313,83 @@ pout k p@(Prove g m (s, n) ps (h, b)) = let k' = scavenge b in case s of
      clos ls = (Sym, (0,0), "}") :ls
      sepa ls = (Sym, (0,0), ";") : ls ++ [(Spc, (0,0), " ")]
 
+
+noDuplicate :: Tm -> Con -> AM ()
+noDuplicate ty con = cope (constructor ty con)
+  (\ _ -> return ())
+  (\ _ -> gripe $ Duplication Prop con)
+
+chkProp :: Appl -> Bloc RawIntro -> AM ()
+chkProp (ls, (t, _, rel) :$$ as) intros | elem t [Uid, Sym]  = do
+  doorStop
+  noDuplicate Prop rel
+  tel <- elabTel as
+  pushOutDoor $ ("Prop", []) ::> (rel, tel)
+  (rus, cxs) <- fold <$> traverse (chkIntro tel) intros
+  guard $ nodup rus
+  mapM_ pushOutDoor cxs
+  doorStep
+  return ()
+ where
+  chkIntro :: Tel -> RawIntro -> AM ([String], [CxE])
+  chkIntro tel (RawIntro aps rp prems) = do
+    doorStop
+    push ImplicitQuantifier
+    (ht, _) <- elabVec rel tel aps
+    (hp, sb0) <- patify ht
+    (ru, as) <- case rp of
+      (_, (t, _, ru) :$$ as) | elem t [Uid, Sym] -> return (ru, as)
+      _ -> gripe FAIL
+    return ()
+    (vs, sb1) <- bindParam as
+    let sb = sb0 ++ sb1
+    guard $ nodup (map fst sb)
+    pop $ \case {ImplicitQuantifier -> True; _ -> False}
+    ps <- traverse chkPrem prems
+    lox <- doorStep
+    tel <- telify vs lox
+    let (tel', ps') = rfold e4p sb (tel, toList ps)
+    let byr = ByRule True $ (hp, (ru, tel')) :<= ps'
+    return ([ru], [byr])
+  chkPrem :: ([Appl], Appl) -> AM Subgoal
+  chkPrem (hs, g) =
+    rfold GIVEN <$> traverse (elabTm Prop) hs <*> (PROVE <$> elabTm Prop g)
+chkProp _ intros = gripe FAIL
+
+patify :: Tm -> AM (Pat, [(Nom, Syn)])
+patify (TC c ts) = do
+  (ts, sb) <- go ts
+  return (PC c ts, sb)
+ where
+  go [] = return ([], [])
+  go (t : ts) = do
+    (t,  sb0) <- patify t
+    (ts, sb1) <- go ts
+    if null (intersect (map fst sb0) (map fst sb1))
+      then return (t : ts, sb0 ++ sb1)
+      else gripe FAIL
+patify (TE (TP (xp, Hide ty))) = do
+  User x <- nomBKind xp
+  return (PM x mempty, [(xp, TM x [] ::: ty)])
+patify _ = gripe FAIL
+
 askRawDecl :: (RawDecl, [LexL]) -> AM String
-askRawDecl (RawProof (Prove gr mr () ps src), ls) = cope (do
-    g <- impQElabTm Prop gr
-    bifoldMap id (($ "") . rfold lout) <$> 
-      (chkProof g mr ps src >>= pout (Denty 1)))
+askRawDecl (RawProof (Prove gr mr () ps src), ls) = id
+  <$ doorStop
+  <*> cope (do
+      g <- impQElabTm Prop gr
+      bifoldMap id (($ "") . rfold lout) <$> 
+        (chkProof g mr ps src >>= pout (Denty 1)))
+    (\ gr -> do
+      e <- ppGripe gr
+      return $ "{- " ++ e ++ "\n" ++ rfold lout ls "\n-}")
+    return
+  <* doorStep
+askRawDecl (RawProp tmpl intros, ls) = cope (chkProp tmpl intros)
   (\ gr -> do
     e <- ppGripe gr
     return $ "{- " ++ e ++ "\n" ++ rfold lout ls "\n-}")
-  return
+  (\ _ -> return $ rfold lout ls "")
 askRawDecl (RawSewage, ls) = return $ "{- don't ask\n" ++ rfold lout ls "\n-}"
 askRawDecl (_, ls) = return $ rfold lout ls ""
 
@@ -325,6 +397,21 @@ filth :: String -> String
 filth s = case runAM go mySetup init of
   Left e -> "OH NO! " ++ show e
   Right (s, _) -> s
+ where
+  go :: AM String
+  go = do
+    ftab <- fixities <$> setup
+    bifoldMap (($ "") . rfold lout) id <$> traverse askRawDecl (raw ftab s)
+  init :: AskState
+  init = AskState
+    { context = myContext
+    , root    = (B0, 0)
+    }
+
+ordure :: String -> String
+ordure s = case runAM go mySetup init of
+  Left e -> "OH NO! " ++ show e
+  Right (s, as) -> s ++ "\n-------------------------\n" ++ show as
  where
   go :: AM String
   go = do

@@ -18,6 +18,8 @@ import Control.Applicative
 import Data.Foldable
 import Control.Monad
 import Control.Arrow ((***))
+import Data.Traversable
+import Data.List hiding ((\\))
 
 import Debug.Trace
 
@@ -91,27 +93,31 @@ maAM (p, t) = go mempty (p, t) where
 impQElabTm :: Tm -> Appl -> AM TmR
 impQElabTm ty a = do
   push ImplicitQuantifier
-  t <- elabTm ty a
+  t <- elabTmR ty a
   pop $ \case
     ImplicitQuantifier -> True
     _ -> False
   return t
 
-elabTm :: Tm -> Appl -> AM TmR
-elabTm ty a@(_, t) = ((`Our` a)) <$> go t
-  where
-    go :: Appl' -> AM Tm
-    go ((t, _, y) :$$ ras) = case t of
-      Lid -> do
-        (e, sy) <- elabSyn y ras
-        subtype sy ty
-        return $ TE e
-      _   -> do
-        tel <- constructor ty y
-        fst <$> elabTel y tel ras
+elabTmR :: Tm -> Appl -> AM TmR
+elabTmR ty a = ((`Our` a)) <$> elabTm ty a
 
-elabTel :: String -> Tel -> [Appl] -> AM (Tm, Matching)
-elabTel con tel as = do
+elabTm :: Tm -> Appl -> AM Tm
+elabTm ty (_, (t, _, y) :$$ ras) = case t of
+  Lid -> do
+    (e, sy) <- elabSyn y ras
+    subtype sy ty
+    return $ TE e
+  Und -> do
+    guard $ null ras
+    x <- hole ty
+    return (TE x)
+  _   -> do
+    tel <- constructor ty y
+    fst <$> elabVec y tel ras
+
+elabVec :: String -> Tel -> [Appl] -> AM (Tm, Matching)
+elabVec con tel as = do
   (ss, sch, po) <- cope (specialise tel as)
     (\ _ -> gripe (WrongNumOfArgs con (ari tel) as))
     return
@@ -138,7 +144,7 @@ elabTel con tel as = do
 argChk :: Matching -> [((String, Tm), Appl)] -> AM Matching
 argChk m [] = return m
 argChk m (((x, t), a) : bs) = do
-  a@(Our s _) <- elabTm (stan m t) a
+  s <- elabTm (stan m t) a
   argChk ((x, s) : m) bs
 
 elabSyn :: String -> [Appl] -> AM (Syn, Tm)
@@ -150,7 +156,7 @@ elabSpine :: (Syn, Tm) -> [Appl] -> AM (Syn, Tm)
 elabSpine fsy [] = return fsy
 elabSpine (f, sy) (a : as) = do
   (dom, ran) <- makeFun sy
-  Our s _ <- elabTm dom a
+  s <- elabTm dom a
   elabSpine (f :$ s, ran) as
 
 
@@ -271,6 +277,76 @@ instance PDep BKind where
 
 
 ------------------------------------------------------------------------------
+--  Obtaining a Telescope from a Template
+------------------------------------------------------------------------------
+
+elabTel :: [Appl] -> AM Tel
+elabTel as = do
+  doorStop
+  phs <- placeHolders as
+  sch <- mayhem $ map fst <$> topSort (map (, ()) phs)
+  for sch $ \ (x, a) -> do
+    ty <- elabTm Type a
+    xn <- fresh x
+    push (Bind (xn, Hide ty) (User x))
+  lox <- doorStep
+  telify (map fst phs) lox
+ where
+  placeHolders :: [Appl] -> AM [(String, Appl)]
+  placeHolders as = do
+    let decolonise i (_, (Sym, _, "::") :$$ [(_, (Lid, _, x) :$$ []) , ty]) =
+          (x, ty)
+        decolonise i ty = ("#" ++ show i, ty)
+    let phs  = zipWith decolonise [0..] as
+    guard $ nodup (map fst phs)
+    return phs 
+
+telify :: [String]  -- the explicit parameter order
+       -> [CxE]     -- the local context (as returned by doorStep)
+       -> AM Tel    -- the telescope
+telify vs lox = go vs [] lox where
+  go vs ps [] = do
+    xs <- traverse (\ x -> mayhem $ (x,) <$> (snd <$> lookup x ps)) vs
+    return $ foldr (:*:) (Pr TRUE) xs
+  go vs ps (Bind (xp, Hide ty) bk : lox) = case bk of
+    Defn t -> do
+      tel <- go vs ps lox
+      return $ e4p (xp, t ::: ty) tel
+    Hole -> do
+      bs <- traverse (\ (_, (xp, _)) -> pDep xp ty) ps
+      guard $ all not bs
+      Ex ty <$> ((xp \\) <$> go vs ps lox)
+    User x -> do
+      tel <- go vs ((x, (xp, ty)) : ps) lox
+      return $ e4p (xp, TM x [] ::: ty) tel
+  go _ _ _ = gripe FAIL
+    
+    
+------------------------------------------------------------------------------
+--  Binding a Parameter List
+------------------------------------------------------------------------------
+
+bindParam :: [Appl] -> AM ([String], [(Nom, Syn)])
+bindParam as = do
+  push ImplicitQuantifier
+  (xs, sb) <- fold <$> traverse go as
+  pop (\case {ImplicitQuantifier -> True; _ -> False})
+  guard $ nodup xs
+  return (xs, sb)
+ where
+  go :: Appl -> AM ([String], [(Nom, Syn)])
+  go (_, a) = do
+    (x, ty) <- case a of
+      (Sym, _, "::") :$$ [(_, (Lid, _, x) :$$ []), ty] -> return (x, ty)
+      (Lid, _, x) :$$ [] -> return (x, ([], (Und, (0,0), "_") :$$ []))
+      _ -> gripe FAIL
+    ty <- elabTm Type ty
+    xn <- fresh x
+    push (Bind (xn, Hide ty) (User x))
+    return ([x], [(xn, (TM x [] ::: ty))])
+
+
+------------------------------------------------------------------------------
 --  Constructor lookup
 ------------------------------------------------------------------------------
 
@@ -289,4 +365,14 @@ constructor ty con = do
     m <- concat <$> ((mayhem $ halfZip ps ss) >>= traverse maAM)
     return [stan m tel]
   try _ _ _ _ = return []
-  
+
+
+------------------------------------------------------------------------------
+--  Duplication Freeness
+------------------------------------------------------------------------------
+
+nodup :: Eq x => [x] -> Bool
+nodup [] = True
+nodup (x : xs)
+  | elem x xs = False
+  | otherwise = nodup xs

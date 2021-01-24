@@ -15,10 +15,13 @@
 module Ask.Src.Tm where
 
 import Data.Bits
-import Data.List
+import Data.List hiding ((\\))
 import Control.Applicative
 import Control.Arrow ((***))
+import Data.Monoid
+import Control.Monad.Writer
 
+import Ask.Src.Bwd
 import Ask.Src.Thin
 import Ask.Src.HalfZip
 import Ask.Src.Hide
@@ -156,6 +159,8 @@ class Stan t where
        -> t -> t
   sbst :: Int -> [Syn]
        -> t -> t
+  abst :: Nom -> Int
+       -> t -> Writer Any t
 
 -- yer ordinary rhythm'n'blues, yer basic rock'n'roll
 (//) :: Stan t => Bind t -> Syn -> t
@@ -166,13 +171,24 @@ upTE :: Syn -> Tm
 upTE (t ::: _) = t
 upTE e = TE e
 
+(\\) :: Stan t => Nom -> t -> Bind t
+x \\ t = if getAny b then L t' else K t where
+  (t', b) = runWriter (abst x 0 t)
+
+-- premature optimisation and all that, but this is ridiculous
+e4p :: Stan t => (Nom, Syn) -> t -> t
+e4p (p, e) t = (p \\ t) // e
+
+
 instance Stan s => Stan [s] where
   stan ms = fmap (stan ms)
   sbst u es = fmap (sbst u es)
+  abst x i = traverse (abst x i)
 
 instance (Stan s, Stan t) => Stan (s, t) where
   stan ms = stan ms *** stan ms
   sbst u es = sbst u es *** sbst u es
+  abst x i (s, t) = (,) <$> abst x i s <*> abst x i t
 
 instance Stan Syn where
   stan ms (t ::: _T) = stan ms t ::: stan ms _T
@@ -185,6 +201,10 @@ instance Stan Syn where
   sbst u es (t ::: _T) = sbst u es t ::: sbst u es _T
   sbst u es (e :$ s) = sbst u es e :$ sbst u es s
   sbst u es e = e
+  abst x i (TP (y, _)) | x == y = TV i <$ tell (Any True)
+  abst x i (t ::: _T) = (:::) <$> abst x i t <*> abst x i _T
+  abst x i (e :$ s) = (:$) <$> abst x i e <*> abst x i s
+  abst x i e = pure e
 
 instance Stan Tm where
   stan ms (TM m es) = case lookup m ms of
@@ -199,12 +219,18 @@ instance Stan Tm where
   sbst u es (TC c ts) = TC c (sbst u es ts)
   sbst u es (TB t)    = TB (sbst u es t)
   sbst u es (TE e)    = upTE (sbst u es e)
+  abst x i (TM m es) = TM m <$> abst x i es
+  abst x i (TC c ts) = TC c <$> abst x i ts
+  abst x i (TB b)    = TB <$> abst x i b
+  abst x i (TE e)    = TE <$> abst x i e
 
 instance Stan b => Stan (Bind b) where
   stan ms (K b) = K (stan ms b)
   stan ms (L b) = L (stan ms b)
   sbst u es (K b) = K (sbst u es b)
   sbst u es (L b) = L (sbst (u + 1) es b)
+  abst x i (K b) = K <$> abst x i b
+  abst x i (L b) = L <$> abst x (i + 1) b
 
 instance Stan Tel where
   stan ms (Ex s b)       = Ex (stan ms s) (stan ms b)
@@ -213,14 +239,19 @@ instance Stan Tel where
   sbst u es (Ex s b)       = Ex (sbst u es s) (sbst u es b)
   sbst u es ((x, s) :*: t) = (x, sbst u es s) :*: sbst u es t
   sbst u es (Pr p)         = Pr (sbst u es p)
+  abst x i (Pr p) = Pr <$> abst x i p
+  abst x i (Ex s b) = Ex <$> abst x i s <*> abst x i b
+  abst x i ((y, s) :*: t) = (:*:) <$> ((y,) <$> abst x i s) <*> abst x i t
 
 instance Stan Subgoal where
   stan ms (PROVE g)   = PROVE (stan ms g)
   stan ms (GIVEN h g) = GIVEN (stan ms h) (stan ms g)
   sbst u es (PROVE g)   = PROVE (sbst u es g)
   sbst u es (GIVEN h g) = GIVEN (sbst u es h) (sbst u es g)
+  abst x i (PROVE g) = PROVE <$> abst x i g
+  abst x i (GIVEN h g) = GIVEN <$> abst x i h <*> abst x i g
 
-instance Stan () where stan _ _ = () ; sbst _ _ _ = ()
+instance Stan () where stan _ _ = () ; sbst _ _ _ = () ; abst _ _ _ = pure ()
 
 
 ------------------------------------------------------------------------------
@@ -250,7 +281,14 @@ instance MDep b => MDep (Bind b) where
 
 topInsert :: MDep t =>
   ((String, t), z) -> [((String, t), z)] -> [((String, t), z)]
-topInsert b [] = [b]
-topInsert b@((x, _), _) (a@((_, t), _) : bs)
-    | mDep x t = b : a : bs
-    | otherwise = a : topInsert b bs
+topInsert b = go (B0 :< b) where
+  go bz [] = bz <>> []
+  go bz (a@((_, t), _) : as)
+    | any (\ ((x, _), _) -> mDep x t) bz = go (bz :< a) as
+    | otherwise = a : go bz as
+
+topSort :: MDep t => [((String, t), z)] -> Maybe [((String, t), z)]
+topSort as = if all ok (tails bs) then Just bs else Nothing where
+  bs = foldl (flip topInsert) [] as
+  ok [] = True
+  ok (((_, t), _) : zs) = all (\ ((x, _), _) -> not (mDep x t)) zs

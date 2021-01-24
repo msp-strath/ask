@@ -25,7 +25,7 @@ by goal a@(_, (t, _, r) :$$ ss) | elem t [Uid, Sym] = do
   subses <- fold <$> (gamma >>= traverse backchain)
   case subses of
     [(tel, subs)] -> do
-      (t, m) <- elabTel r tel ss
+      (t, m) <- elabVec r tel ss
       mapM_ demand (stan m subs)
       return $ Our t a
     []     -> gripe $ ByBadRule r goal

@@ -88,6 +88,9 @@ ppEl spot (f :$ s) = do
 
 ppGripe :: Gripe -> AM String
 ppGripe Surplus = return "I don't see why you need this"
+ppGripe (Duplication ty c) = do
+  ty <- ppTm AllOK ty
+  return $ "I already have something called " ++ c ++ " that makes things in " ++ ty
 ppGripe (Scope x) = return $ "I can't find " ++ x ++ " in scope"
 ppGripe (ByBadRule r t) = do
   t <- ppTm AllOK t

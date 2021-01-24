@@ -37,6 +37,7 @@ data CxE -- what sort of thing is in the context?
   | (Con, [Pat]) ::> (Con, Tel)
   | ByRule Bool{- pukka intro?-} Rule
   | Demand Subgoal
+  | DoorStop
   deriving Show
 
 data BKind
@@ -58,6 +59,7 @@ data Rule =
 
 data Gripe
   = Surplus
+  | Duplication Tm Con
   | Scope String
   | ByBadRule String Tm
   | ByAmbiguous String Tm
@@ -233,3 +235,30 @@ demands = do
   go B0 ss = (B0, ss)
   go (ga :< Demand s) ss = go ga (s : ss)
   go (ga :< z) ss = ((:< z) *** id) (go ga ss)
+
+
+------------------------------------------------------------------------------
+--  DoorStop
+------------------------------------------------------------------------------
+
+-- these should bracket
+
+doorStop :: AM ()
+doorStop = push DoorStop
+
+doorStep :: AM [CxE]
+doorStep = do
+  ga <- gamma
+  let (ga', de) = go ga []
+  setGamma ga'
+  return de
+ where
+  go (ga :< DoorStop) de = (ga, de)
+  go (ga :< z)        de = go ga (z : de)
+  go B0               de = (B0, de)       -- heaven forfend
+
+pushOutDoor :: CxE -> AM ()
+pushOutDoor x = (go <$> gamma) >>= setGamma where
+  go B0               = B0 :< x  -- heaven forfend
+  go (ga :< DoorStop) = ga :< x :< DoorStop
+  go (ga :< z)        = go ga :< z

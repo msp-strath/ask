@@ -2,6 +2,8 @@
 
 module Ask.Src.Bwd where
 
+infixl 3 :<, <><
+
 data Bwd x = B0 | Bwd x :< x deriving (Show, Eq, Ord, Functor, Foldable, Traversable)
 
 (<>>) :: Bwd x -> [x] -> [x]
