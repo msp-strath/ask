@@ -143,8 +143,8 @@ chkSubProofs ps = do
     <|> equal Prop (s, TRUE)
     <|> case s of
           TC "=" [_X, _Y, x, y] -> do
-            equal Type (_X, _Y)
-            equal _X (x, y)
+            unify Type _X _Y
+            unify _X x y
           _ -> gripe FAIL
             
   need (PROVE g) =

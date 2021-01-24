@@ -104,18 +104,19 @@ elabTmR ty a = ((`Our` a)) <$> elabTm ty a
 
 elabTm :: Tm -> Appl -> AM Tm
 elabTm ty (_, a) | track (show ty ++ " on " ++ show a) False = undefined
-elabTm ty (_, (t, _, y) :$$ ras) = case t of
-  Lid -> do
+elabTm ty (_, (t, _, y) :$$ ras) = case (t, y) of
+  _ | t == Lid || (t, y) == (Sym, "::") -> do
     (e, sy) <- elabSyn y ras
     subtype sy ty
     return $ TE e
-  Und -> do
+  (Und, _) -> do
     guard $ null ras
     x <- hole ty
     return (TE x)
-  _   -> do
+  (t, _) | elem t [Uid, Sym] -> do
     tel <- constructor ty y
     fst <$> elabVec y tel ras
+  _ -> gripe FAIL
 
 elabVec :: String -> Tel -> [Appl] -> AM (Tm, Matching)
 elabVec con tel as = do
@@ -149,6 +150,10 @@ argChk m (((x, t), a) : bs) = do
   argChk ((x, s) : m) bs
 
 elabSyn :: String -> [Appl] -> AM (Syn, Tm)
+elabSyn "::" (tm : ty : as) = do
+  ty <- elabTm Type ty
+  tm <- elabTm ty tm
+  elabSpine (tm ::: ty, ty) as
 elabSyn f as = do
   f@(TP (_, Hide t)) <- what's f
   elabSpine (f, t) as
