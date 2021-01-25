@@ -62,9 +62,57 @@ hnfSyn (t ::: ty) = do
 hnfSyn (f :$ s) = hnfSyn f >>= \case
   (TB b ::: TC "->" [dom, ran]) -> return ((b // (s ::: dom)) ::: ran)
   f -> return (f :$ s)
-  
+
+(|:-) :: (String, Tm) -> (Syn -> AM x) -> AM x
+(x, s) |:- p = do
+  xn <- fresh x
+  let xp = (xn, Hide s)
+  push $ Bind xp (User x)
+  y <- p (TP xp)
+  pop $ \case
+    Bind (yn, _) _ | xn == yn -> True
+    _ -> False
+  return y
+
 equal :: Tm -> (Tm, Tm) -> AM ()
-equal ty (x, y) = guard $ x == y -- not for long
+equal ty (x, y) = do
+  ty <- hnf ty
+  x <- hnf x
+  y <- hnf y
+  case (x, y) of
+    (TC c ss, TC d ts) | c == d -> do
+      tel <- constructor ty c
+      equals tel ss ts
+    (TB a, TB b) -> case ty of
+      TC "->" [dom, ran] -> do
+        ("", dom) |:- \ x -> equal ran (a // x, b // x)
+      _ -> gripe NotEqual
+    (TE e, TE f) -> eqSyn e f >> return ()
+    _ -> gripe NotEqual
+
+equals :: Tel -> [Tm] -> [Tm] -> AM ()
+equals tel ss ts = go [] tel ss ts where
+  go :: [((String, Tm), (Tm, Tm))] -> Tel -> [Tm] -> [Tm] -> AM ()
+  go acc (Pr _) [] [] = hit [] acc
+  go acc (Ex a b) (s : ss) (t : ts) = do
+    equal a (s, t)
+    go acc (b // (s ::: a)) ss ts
+  go acc ((x, a) :*: b) (s : ss) (t : ts) =
+    go (topInsert ((x, a), (s, t)) acc) b ss ts
+  hit :: Matching -> [((String, Tm), (Tm, Tm))] -> AM ()
+  hit m [] = return ()
+  hit m (((x, a), (s, t)) : sch) = do
+    equal (stan m a) (s, t)
+    hit ((x, s) : m) sch
+
+eqSyn :: Syn -> Syn -> AM Tm
+eqSyn (TP (xn, Hide ty)) (TP (yn, _)) | xn == yn = hnf ty
+eqSyn (t ::: ty) e = equal ty (t, upTE e) >> return ty
+eqSyn e (t ::: ty) = equal ty (upTE e, t) >> return ty
+eqSyn (f :$ s) (g :$ t) = do
+  TC "->" [dom, ran] <- eqSyn f g
+  equal dom (s, t)
+  return ran
 
 
 ------------------------------------------------------------------------------
