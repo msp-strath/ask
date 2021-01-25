@@ -40,19 +40,19 @@ data Status
   | Need
   deriving Show
 
-passive :: Prove () Appl -> Prove Anno TmR
-passive (Prove g m () ps src) =
-  Prove (Your g) (fmap Your m) (Keep, False) (fmap subPassive ps) src
+passive :: Make () Appl -> Make Anno TmR
+passive (Make k g m () ps src) =
+  Make k (Your g) (fmap Your m) (Keep, False) (fmap subPassive ps) src
   
-subPassive :: SubProve () Appl -> SubProve Anno TmR
+subPassive :: SubMake () Appl -> SubMake Anno TmR
 subPassive ((srg, gs) ::- p) = (srg, map (fmap Your) gs) ::- passive p
 subPassive (SubPGuff ls) = SubPGuff ls
 
-surplus :: Prove () Appl -> Prove Anno TmR
-surplus (Prove g m () ps src) =
-  Prove (Your g) (fmap Your m) (Junk Surplus, True) (fmap subPassive ps) src
+surplus :: Make () Appl -> Make Anno TmR
+surplus (Make k g m () ps src) =
+  Make k (Your g) (fmap Your m) (Junk Surplus, True) (fmap subPassive ps) src
   
-subSurplus :: SubProve () Appl -> SubProve Anno TmR
+subSurplus :: SubMake () Appl -> SubMake Anno TmR
 subSurplus ((srg, gs) ::- p) = (srg, map (fmap Your) gs) ::- surplus p
 subSurplus (SubPGuff ls) = SubPGuff ls
 
@@ -60,12 +60,12 @@ subSurplus (SubPGuff ls) = SubPGuff ls
 chkProof
   :: TmR         -- the goal
   -> Method Appl -- the method
-  -> Bloc (SubProve () Appl)  -- the subproofs
+  -> Bloc (SubMake () Appl)  -- the subproofs
   -> ([LexL], [LexL])  -- source tokens (head, body)
-  -> AM (Prove Anno TmR)  -- the reconstructed proof
+  -> AM (Make Anno TmR)  -- the reconstructed proof
 
 chkProof g m ps src = cope go junk return where
-  junk gr = return $ Prove g (fmap Your m) (Junk gr, True)
+  junk gr = return $ Make Prf g (fmap Your m) (Junk gr, True)
     (fmap subPassive ps) src
   go = case my g of
     Just gt -> do
@@ -81,12 +81,12 @@ chkProof g m ps src = cope go junk return where
         MGiven -> MGiven <$ given gt
       ns <- chkSubProofs ps
       let proven = case m of {Stub -> False; _ -> all happy ns}
-      return $ Prove g m (Keep, proven) ns src
-    Nothing -> return $ Prove g (fmap Your m) (Junk Mardiness, True)
+      return $ Make Prf g m (Keep, proven) ns src
+    Nothing -> return $ Make Prf g (fmap Your m) (Junk Mardiness, True)
       (fmap subPassive ps) src
 
-happy :: SubProve Anno TmR -> Bool
-happy (_ ::- Prove _ _ (_, b) _ _) = b
+happy :: SubMake Anno TmR -> Bool
+happy (_ ::- Make _ _ _ (_, b) _ _) = b
 happy _ = True
  
 -- checking subproofs amounts to validating them,
@@ -95,8 +95,8 @@ happy _ = True
 -- and marking as surplus those subproofs which do
 -- not form part of the cover
 chkSubProofs
-  :: Bloc (SubProve () Appl)         -- subproofs coming from user
-  -> AM (Bloc (SubProve Anno TmR))   -- reconstruction
+  :: Bloc (SubMake () Appl)         -- subproofs coming from user
+  -> AM (Bloc (SubMake Anno TmR))   -- reconstruction
 chkSubProofs ps = do
   ss <- demands
   ps <- traverse validSubProof ps
@@ -106,33 +106,33 @@ chkSubProofs ps = do
  where
   cover
     :: [Subgoal]  -- subgoals to cover
-    -> Bloc (Bool, SubProve Anno TmR)  -- (used yet?, subproof)
-    -> AM (Bloc (Bool, SubProve Anno TmR)  -- ditto
+    -> Bloc (Bool, SubMake Anno TmR)  -- (used yet?, subproof)
+    -> AM (Bloc (Bool, SubMake Anno TmR)  -- ditto
           , [Subgoal]                      -- undischarged subgoals
           )
   cover [] qs = return (qs, [])
   cover (t : ts) qs = cope (cover1 t qs)
     (\ _ -> cover ts qs >>= \ (qs, ts) -> return (qs, t : ts))
     $ cover ts
-  cover1 :: Subgoal -> Bloc (Bool, SubProve Anno TmR)
-         -> AM (Bloc (Bool, SubProve Anno TmR))
+  cover1 :: Subgoal -> Bloc (Bool, SubMake Anno TmR)
+         -> AM (Bloc (Bool, SubMake Anno TmR))
   cover1 t (_ :-/ Stop) = gripe FAIL
   cover1 t (g :-/ (b, p) :-\ qs) = cope (covers t p)
     (\ _ -> ((g :-/) . ((b, p) :-\ )) <$> cover1 t qs)
     $ \ _ -> return $ (g :-/ (True, p) :-\ qs)
-  covers :: Subgoal -> SubProve Anno TmR -> AM ()
-  covers t ((_, hs) ::- Prove g m (Keep, _) _ _) = subgoal t $ \ t -> do
+  covers :: Subgoal -> SubMake Anno TmR -> AM ()
+  covers t ((_, hs) ::- Make Prf g m (Keep, _) _ _) = subgoal t $ \ t -> do
     g <- mayhem $ my g
     traverse ensure hs
     equal Prop (g, t)
    where
     ensure (Given h) = mayhem (my h) >>= given
   covers t _ = gripe FAIL
-  squish :: (Bool, SubProve Anno TmR) -> SubProve Anno TmR
-  squish (False, gs ::- Prove g m (Keep, _) ss src) =
-    gs ::- Prove g m (Junk Surplus, True) ss src
+  squish :: (Bool, SubMake Anno TmR) -> SubMake Anno TmR
+  squish (False, gs ::- Make k g m (Keep, _) ss src) =
+    gs ::- Make k g m (Junk Surplus, True) ss src
   squish (_, q) = q
-  extra :: [Subgoal] -> AM [SubProve Anno TmR]
+  extra :: [Subgoal] -> AM [SubMake Anno TmR]
   extra [] = return []
   extra (u : us) = cope (subgoal u obvious)
     (\ _ -> (need u :) <$> extra us)
@@ -148,7 +148,7 @@ chkSubProofs ps = do
           _ -> gripe FAIL
             
   need (PROVE g) =
-    ([], []) ::- Prove (My g) Stub (Need, False)
+    ([], []) ::- Make Prf (My g) Stub (Need, False)
       ([] :-/ Stop) ([], [])
   need (GIVEN h u) = case need u of
     (_, gs) ::- p -> ([], Given (My h) : gs) ::- p
@@ -162,19 +162,19 @@ subgoal (GIVEN h g) k = h |- subgoal g k
 subgoal (PROVE g) k = k g
 
 validSubProof
-  :: SubProve () Appl
-  -> AM (SubProve Anno TmR)
-validSubProof ((srg, Given h : gs) ::- p@(Prove sg sm () sps src)) =
+  :: SubMake () Appl
+  -> AM (SubMake Anno TmR)
+validSubProof ((srg, Given h : gs) ::- p@(Make k sg sm () sps src)) =
   cope (elabTm Prop h)
     (\ gr -> return $ (srg, map (fmap Your) (Given h : gs)) ::-
-      Prove (Your sg) (fmap Your sm) (Junk gr, True)
+      Make k (Your sg) (fmap Your sm) (Junk gr, True)
         (fmap subPassive sps) src)
     $ \ ht -> do
       (srg, gs) ::- p <- ht |- validSubProof ((srg, gs) ::- p)
       return $ (srg, Given (Our ht h) : gs) ::- p
-validSubProof ((srg, []) ::- Prove sg sm () sps src) =
-  cope (elabTmR Prop sg)
-    (\ gr -> return $ (srg, []) ::- Prove  (Your sg) (fmap Your sm) (Junk gr, True)
+validSubProof ((srg, []) ::- Make k sg sm () sps src) =
+  cope (guard (k == Prf) >> elabTmR Prop sg)
+    (\ gr -> return $ (srg, []) ::- Make k (Your sg) (fmap Your sm) (Junk gr, True)
       (fmap subPassive sps) src)
     $ \ sg -> ((srg, []) ::-) <$> chkProof sg sm sps src
 validSubProof (SubPGuff ls) = return $ SubPGuff ls
@@ -195,17 +195,17 @@ fromSubs g f = map snd {- ignorant -} <$> invert f >>= \case
   propify (GIVEN s t) = s :-> propify t
   propify (PROVE p)   = p
 
-pout :: LayKind -> Prove Anno TmR -> AM (Odd String [LexL])
-pout k p@(Prove g m (s, n) ps (h, b)) = let k' = scavenge b in case s of
+pout :: LayKind -> Make Anno TmR -> AM (Odd String [LexL])
+pout k p@(Make mk g m (s, n) ps (h, b)) = let k' = scavenge b in case s of
   Keep -> do
     blk <- psout k' ps
-    return $ (rfold lout (h `prove` n) . whereFormat b ps
+    return $ (rfold lout (h `tense` n) . whereFormat b ps
              $ format k' blk)
              :-/ Stop
   Need -> do
     g <- ppTmR AllOK g
     blk <- psout k' ps
-    return $ (("prove " ++) . (g ++) . (" ?" ++) . whereFormat b ps
+    return $ ((show m ++) . (" " ++) . (g ++) . (" ?" ++) . whereFormat b ps
              $ format k' blk)
              :-/ Stop
   Junk e -> do
@@ -215,22 +215,23 @@ pout k p@(Prove g m (s, n) ps (h, b)) = let k' = scavenge b in case s of
       (rfold lout h . rfold lout b $ "") :-/ [(Ret, (0,0), "\n")] :-\
       "-}" :-/ Stop
  where
-   ((Key, p, s) : ls) `prove` n | elem s ["prove", "proven"] =
-     (Key, p, "prove" ++ if n then "n" else "") : ls
+   kws = [done mk b | b <- [False, True]]
+   ((Key, p, s) : ls) `tense` n | elem s kws =
+     (Key, p, done mk n) : ls
    (l : ls) `prove` n = l : (ls `prove` n)
    [] `prove` n = [] -- should never happen
    
-   psout :: LayKind -> Bloc (SubProve Anno TmR) -> AM (Bloc String)
+   psout :: LayKind -> Bloc (SubMake Anno TmR) -> AM (Bloc String)
    psout k (g :-/ Stop) = return $ g :-/ Stop
    psout k (g :-/ SubPGuff [] :-\ h :-/ r) = psout k ((g ++ h) :-/ r)
    psout k (g :-/ p :-\ gpo) =
      (g :-/) <$> (ocato <$> subpout k p <*> psout k gpo)
 
-   subpout :: LayKind -> SubProve Anno TmR -> AM (Odd String [LexL])
+   subpout :: LayKind -> SubMake Anno TmR -> AM (Odd String [LexL])
    subpout _ (SubPGuff ls)
      | all gappy ls = return $ rfold lout ls "" :-/ Stop
      | otherwise = return $ ("{- " ++ rfold lout ls " -}") :-/ Stop
-   subpout _ ((srg, gs) ::- Prove _ _ (Junk e, _) _ (h, b)) = do
+   subpout _ ((srg, gs) ::- Make m _ _ (Junk e, _) _ (h, b)) = do
      e <- ppGripe e
      return $
        ("{- " ++ e) :-/ [] :-\
@@ -421,7 +422,7 @@ chkData (_, (t, _, tcon) :$$ as) vcons | elem t [Uid, Sym] = do
 chkData _ _ = gripe FAIL
 
 askRawDecl :: (RawDecl, [LexL]) -> AM String
-askRawDecl (RawProof (Prove gr mr () ps src), ls) = id
+askRawDecl (RawProof (Make Prf gr mr () ps src), ls) = id
   <$ doorStop
   <*> cope (do
       g <- impQElabTm Prop gr

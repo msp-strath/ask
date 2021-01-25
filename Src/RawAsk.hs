@@ -32,7 +32,8 @@ data RawDecl
   | RawFixity FixityTable
   | RawProp Appl (Bloc RawIntro)
   | RawData Appl [Appl]
-  | RawProof (Prove () Appl)
+  | RawSig Appl Appl
+  | RawProof (Make () Appl)
   deriving Show
   
 data RawIntro
@@ -42,34 +43,61 @@ data RawIntro
   , rulePrems :: Bloc ([Appl], Appl)
   } deriving Show
 
-data Prove a t
-  = Prove
-  { goal       :: t
+data Make a t
+  = Make
+  { making     :: Making
+  , goal       :: t
   , method     :: Method t
   , annotation :: a
-  , subproofs  :: Bloc (SubProve a t)
+  , subproofs  :: Bloc (SubMake a t)
   , source     :: ([LexL], [LexL])
-  } deriving (Functor)
+  }
+  deriving (Functor)
 
-data SubProve a t
-  = ([LexL], [Given t]) ::- Prove a t
+data SubMake a t
+  = ([LexL], [Given t]) ::- Make a t
   | SubPGuff [LexL]
   deriving (Functor)
+
+data Making = Prf | Def deriving Eq
+instance Show Making where
+  show Prf = "prove"
+  show Def = "define"
+done :: Making -> Bool -> String
+done m False = show m
+done m True  = show m ++ case m of {Prf -> "n"; Def -> "d"}
+
+data Method t
+  = Stub
+  | By t
+  | From t
+  | MGiven
+  | Is t
+  deriving (Show, Functor)
+
+data Given t
+  = Given t
+  deriving (Show, Functor)
+
+data Assocy = LAsso | NAsso | RAsso deriving (Show, Eq)
+type FixityTable = M.Map String (Int, Assocy)
+
 
 
 ------------------------------------------------------------------------------
 --  Show instances which hide
 ------------------------------------------------------------------------------
 
-instance (Show a, Show t) => Show (Prove a t) where
+instance (Show a, Show t) => Show (Make a t) where
   show p = concat
-    [ show (goal p), " "
+    [ show (making p), " "
+    , show (goal p), " "
     , show (method p), " "
     , show (annotation p), "\n"
     , show (subproofs p)
     ]
 
-instance (Show a, Show t) => Show (SubProve a t) where
+instance (Show a, Show t) => Show (SubMake a t) where
   show ((_, gs) ::- p) = show gs ++ " |- " ++ show p
   show (SubPGuff ls) = "SubPGuff " ++ show ls
 
@@ -96,7 +124,8 @@ pDecl = good <* eol where
      <|> RawFixity <$> (((,) <$> penv <*> mkFixity) >>= agree)
      <|> uncurry RawProp <$ the Key "prop" <*> pProp
      <|> uncurry RawData <$ the Key "data" <*> pData
-     <|> RawProof <$> pProve
+     <|> RawSig <$> pAppl ["::", "="] <* spd (the Sym "::") <*> pAppl []
+     <|> RawProof <$> pMake
   agree (ft, at) = at <$ guard (all id $ M.intersectionWith (==) at ft)
 
 pProp :: PF (Appl, Bloc RawIntro)
@@ -124,44 +153,40 @@ pIntro h = do
 pData :: PF (Appl, [Appl])
 pData = (,) <$ spc <*> pAppl ["="] <* spd (the Sym "=") <*> sep (pAppl ["|"]) (spd (the Sym "|"))
 
-pProve :: PF (Prove () Appl)
-pProve = do
-  (top, (go, me)) <- ext $
-    (,) <$ (the Key "prove" <|> the Key "proven") <* spc <*> pAppl [] <* spc <*> pMethod
+pMake :: PF (Make () Appl)
+pMake = do
+  (top, (mk, go, me)) <- ext $ do
+    mk <- pMaking
+    spc
+    go <- pAppl $ case mk of {Prf -> []; Def -> ["="]}
+    spc
+    me <- pMethod mk
+    return (mk, go, me)
   (body, ps) <- ext (id <$ spc <*> pSubs)
-  return $ Prove
-    { goal       = go
+  return $ Make
+    { making     = mk
+    , goal       = go
     , method     = me
     , annotation = ()
     , subproofs  = ps
     , source     = (top, body)
     }
   where
-  pMethod
+  pMaking = Prf <$ (the Key "prove" <|> the Key "proven")
+        <|> Def <$ (the Key "define" <|> the Key "defined")
+  pMethod mk
     =   Stub <$ the Sym "?"
-    <|> By   <$ the Key "by"   <* spc <*> pAppl []
     <|> From <$ the Key "from" <* spc <*> pAppl []
-    <|> MGiven <$ the Key "given"
+    <|> case mk of
+           Prf -> By   <$ the Key "by"   <* spc <*> pAppl []
+              <|> MGiven <$ the Key "given"
+           Def -> Is <$ the Sym "=" <* spc <*> pAppl []
   pSubs = lol "where" pSub <|> pure ([] :-/ Stop)
-  pSub = ((::-) <$> ext (pGivens <* spc) <*> pProve <* spc <* eol)
+  pSub = ((::-) <$> ext (pGivens <* spc) <*> pMake <* spc <* eol)
       ?> ((SubPGuff . fst) <$> ext (many (eat Just) <* eol))
   pGivens
     =   id <$ the Key "given" <* spc <*> sep (Given <$> pAppl []) (spd (the Sym ","))
     <|> pure []
-
-data Method t
-  = Stub
-  | By t
-  | From t
-  | MGiven
-  deriving (Show, Functor)
-
-data Given t
-  = Given t
-  deriving (Show, Functor)
-
-data Assocy = LAsso | NAsso | RAsso deriving (Show, Eq)
-type FixityTable = M.Map String (Int, Assocy)
 
 getFixities :: Bloc [LexL] -> FixityTable
 getFixities = foldMap (glom . parTok mkFixity mempty) where
