@@ -99,6 +99,7 @@ equals tel ss ts = go [] tel ss ts where
     go acc (b // (s ::: a)) ss ts
   go acc ((x, a) :*: b) (s : ss) (t : ts) =
     go (topInsert ((x, a), (s, t)) acc) b ss ts
+  go _ _ _ _ = gripe NotEqual
   hit :: Matching -> [((String, Tm), (Tm, Tm))] -> AM ()
   hit m [] = return ()
   hit m (((x, a), (s, t)) : sch) = do
@@ -113,6 +114,7 @@ eqSyn (f :$ s) (g :$ t) = do
   TC "->" [dom, ran] <- eqSyn f g
   equal dom (s, t)
   return ran
+eqSyn _ _ = gripe NotEqual
 
 
 ------------------------------------------------------------------------------
