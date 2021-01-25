@@ -128,6 +128,7 @@ phase0 p@(y, x) (c : cs) = case c of
     | isDigit c -> more0 Num p (B0 :< c) (y, x + 1) isDigit cs
     | isLower c -> more0 Lid p (B0 :< c) (y, x + 1) isIdTaily cs
     | isUpper c -> more0 Uid p (B0 :< c) (y, x + 1) isIdTaily cs
+    | otherwise -> phase0 (y, x + 1) cs
 
 more0 :: Tok0 -> Pos -> Bwd Char -> Pos -> (Char -> Bool) -> String -> [Lex0]
 more0 t o cz (y, x) f (c : cs) | f c = more0 t o (cz :< c) (y, x + 1) f cs
