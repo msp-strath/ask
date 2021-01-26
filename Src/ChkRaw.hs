@@ -205,7 +205,7 @@ pout k p@(Make mk g m (s, n) ps (h, b)) = let k' = scavenge b in case s of
   Need -> do
     g <- ppTmR AllOK g
     blk <- psout k' ps
-    return $ ((show m ++) . (" " ++) . (g ++) . (" ?" ++) . whereFormat b ps
+    return $ ((show mk ++) . (" " ++) . (g ++) . (" ?" ++) . whereFormat b ps
              $ format k' blk)
              :-/ Stop
   Junk e -> do
