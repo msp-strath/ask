@@ -26,8 +26,9 @@ import Ask.Src.Typing
 import Ask.Src.Proving
 import Ask.Src.Printing
 import Ask.Src.HardwiredRules
+import Ask.Src.Progging
 
-tracy = const id
+tracy = trace
 
 type Anno =
   ( Status
@@ -55,6 +56,77 @@ surplus (Make k g m () ps src) =
 subSurplus :: SubMake () Appl -> SubMake Anno TmR
 subSurplus ((srg, gs) ::- p) = (srg, map (fmap Your) gs) ::- surplus p
 subSurplus (SubPGuff ls) = SubPGuff ls
+
+chkProg
+  :: Proglem
+  -> Appl
+  -> Method Appl -- the method
+  -> Bloc (SubMake () Appl)  -- the subproofs
+  -> ([LexL], [LexL])  -- source tokens (head, body)
+  -> AM (Make Anno TmR)  -- the reconstructed proof
+chkProg p gr mr ps src@(h,b) = do
+  m <- case mr of
+    Stub -> pure Stub
+    Is a -> do
+      doorStop
+      traverse push (localCx p)
+      a@(Our t _) <- elabTmR (rightTy p) a
+      (PC _ ps, sb) <- patify $ TC "" (map fst (leftImpl p ++ leftSatu p ++ leftAppl p))
+      doorStep
+      pushOutDoor $ (fNom p, ps) :=: rfold e4p sb (t ::: rightTy p)
+      pure (Is a)
+    From a@(_, ((_, _, x) :$$ as)) -> do
+      doorStop
+      traverse push (localCx p)
+      (e, _) <- elabSyn x as
+      doorStep
+      TE (TP (xn, Hide ty)) <- return (upTE e)
+      tels <- conSplit ty
+      traverse (expect xn ty p) tels
+      pure (From (Our (TE e) a))
+    _ -> gripe FAIL
+  ns <- chkSubProofs ps
+  let proven = case m of {Stub -> False; _ -> all happy ns}
+  return $ Make Def (Your gr) m (Keep, proven) ns src
+ where
+  expect :: Nom -> Tm -> Proglem -> (Con, Tel) -> AM ()
+  expect xn ty p (c, tel) = do
+    (de, sb) <- wrangle (localCx p)
+    push . Expect $ sbpg sb (p {localCx = de})
+   where
+    wrangle B0 = gripe FAIL
+    wrangle (ga :< (Bind (yn, _) (User y))) | yn == xn = do
+      (ga, xs) <- bungle ga [] B0 y tel
+      return (ga, [(xn, TC c xs ::: ty)])
+    wrangle (ga :< z) = do
+      (ga, sb) <- wrangle ga
+      case z of
+        Hyp h -> return (ga :< Hyp (rfold e4p sb h), sb)
+        Bind (yn, Hide ty) k -> do
+          let yp = (yn, Hide (rfold e4p sb ty))
+          return (ga :< Bind yp k, (yn, TP yp) : sb)
+        z -> return (ga :< z, sb) 
+    bungle ga sch xz y (Pr hs) = do
+      zs <- for sch $ \ ((x, s), _) -> do
+        xn <- fresh (y ++ x)
+        return (x, xn, s)
+      let m = [ (z, TE (TP (zn, Hide (stan m s))))
+              | (z, zn, s) <- zs
+              ]
+      return (foldl glom ga m <>< map Hyp (stan m hs), stan m (xz <>> []))
+     where
+      glom ga (z, TE (TP xp)) = ga :< Bind xp (User z)
+      glom ga _ = ga
+    bungle ga sch xz y (Ex a b) = do
+      xn <- fresh ""
+      let xp = (xn, Hide a)
+      (ga, xs) <- bungle (ga :< Bind xp (User "")) sch xz y (b // TP xp)
+      return (ga, TE (TP xp) : xs)
+    bungle ga sch xz y ((x, s) :*: tel) =
+      bungle ga (topInsert ((x, s), ()) sch) (xz :< TM x []) y tel
+    sbpg :: [(Nom, Syn)] -> Proglem -> Proglem
+    sbpg sb (Proglem de f li ls la ty) =
+      Proglem de f (rfold e4p sb li) (rfold e4p sb ls) (rfold e4p sb la) (rfold e4p sb ty)
 
 -- this type is highly provisional
 chkProof
@@ -88,7 +160,7 @@ chkProof g m ps src = cope go junk return where
 happy :: SubMake Anno TmR -> Bool
 happy (_ ::- Make _ _ _ (_, b) _ _) = b
 happy _ = True
- 
+
 -- checking subproofs amounts to validating them,
 -- then checking which subgoals are covered,
 -- generating stubs for those which are not,
@@ -384,8 +456,9 @@ chkData :: Appl -> [Appl] -> AM ()
 chkData (_, (t, _, tcon) :$$ as) vcons | elem t [Uid, Sym] = do
   noDuplicate Type tcon
   doorStop
+  doorStop
   (vs, _) <- bindParam as
-  fake <- gamma >>= (`fakeTel` Pr TRUE)
+  fake <- gamma >>= (`fakeTel` Pr [])
   push $ ("Type", []) ::> (tcon, fake)
   cts <- traverse chkCon vcons
   guard $ nodup (map fst cts)
@@ -395,6 +468,8 @@ chkData (_, (t, _, tcon) :$$ as) vcons | elem t [Uid, Sym] = do
   (ps, sb) <- mkPatsSubs 0 lox
   for cts $ \ (c, tel) ->
     push $ (tcon, ps) ::> (c, rfold e4p sb tel)
+  ctors <- doorStep
+  push $ Data tcon (B0 <>< ctors)
   return ()
  where
   fakeTel :: Context -> Tel -> AM Tel
@@ -418,9 +493,24 @@ chkData (_, (t, _, tcon) :$$ as) vcons | elem t [Uid, Sym] = do
     User x ->
        ((PM x mempty :) *** ((xp, TM x [] ::: ty) :)) <$> mkPatsSubs (i + 1) lox
   mkPatsSubs i (_ : lox) = mkPatsSubs i lox
-
 chkData _ _ = gripe FAIL
 
+chkSig :: Appl -> Appl -> AM ()
+chkSig la@(_, (t, _, f@(c : _)) :$$ as) rty
+  | t == Lid || (t == Sym && c /= ':')
+  = do
+  -- cope (what's f) (\ gr -> return ()) (\ _ -> gripe $ AlreadyDeclared f)
+  doorStop
+  push ImplicitQuantifier
+  xts <- placeHolders as
+  rty <- elabTm Type rty
+  pop $ \case {ImplicitQuantifier -> True; _ -> False}
+  lox <- doorStep
+  sch <- schemify (map fst xts) lox rty
+  fn <- fresh f
+  push $ Declare f fn sch
+  return ()
+    
 askRawDecl :: (RawDecl, [LexL]) -> AM String
 askRawDecl (RawProof (Make Prf gr mr () ps src), ls) = id
   <$ doorStop
@@ -433,12 +523,33 @@ askRawDecl (RawProof (Make Prf gr mr () ps src), ls) = id
       return $ "{- " ++ e ++ "\n" ++ rfold lout ls "\n-}")
     return
   <* doorStep
+askRawDecl (RawProof (Make Def gr@(_, (_, _, f) :$$ as) mr () ps src), ls) = id
+  <$ doorStop
+  <*> cope (do
+      Left (fn, sch : _) <- what's f
+      p <- proglify fn sch
+      p <- dubStep p f as
+      True <- tracy (show p) $ return True
+      bifoldMap id (($ "") . rfold lout) <$> 
+        (chkProg p gr mr ps src >>= pout (Denty 1))
+      )
+     (\ gr -> do
+       e <- ppGripe gr
+       return $ "{- " ++ e ++ "\n" ++ rfold lout ls "\n-}")
+    return
+  -- <* doorStep
 askRawDecl (RawProp tmpl intros, ls) = cope (chkProp tmpl intros)
   (\ gr -> do
     e <- ppGripe gr
     return $ "{- " ++ e ++ "\n" ++ rfold lout ls "\n-}")
   (\ _ -> return $ rfold lout ls "")
 askRawDecl (RawData tcon vcons, ls) = cope (chkData tcon vcons)
+  (\ gr -> do
+    e <- ppGripe gr
+    return $ "{- " ++ e ++ "\n" ++ rfold lout ls "\n-}")
+  (\ _ -> return $ rfold lout ls "")
+askRawDecl (RawSig la ra, ls) =
+  cope (chkSig la ra)
   (\ gr -> do
     e <- ppGripe gr
     return $ "{- " ++ e ++ "\n" ++ rfold lout ls "\n-}")

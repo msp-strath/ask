@@ -8,6 +8,7 @@
     CPP
   , PatternSynonyms
   , TupleSections
+  , LambdaCase
 #-}
 
 module Ask.Src.Context where
@@ -33,11 +34,17 @@ type Context = Bwd CxE
 data CxE -- what sort of thing is in the context?
   = Hyp Tm
   | Bind (Nom, Hide Tm) BKind
+  | (Nom, [Pat]) :=: Syn  -- computation rule
+  | Declare String Nom Sch
   | ImplicitQuantifier
-  | (Con, [Pat]) ::> (Con, Tel)
+  | (Con, [Pat]) ::> (Con, Tel)  -- constructor declaration
   | ByRule Bool{- pukka intro?-} Rule
   | Demand Subgoal
+  | Expect Proglem
   | DoorStop
+  | Data
+      Con         -- name of data type
+      Context     -- constructor declarations
   deriving Show
 
 data BKind
@@ -60,6 +67,7 @@ data Rule =
 data Gripe
   = Surplus
   | Duplication Tm Con
+  | AlreadyDeclared String
   | Scope String
   | ByBadRule String Tm
   | ByAmbiguous String Tm
@@ -190,7 +198,7 @@ pop test = do
     | otherwise = go ga >>= \ (ga, y) -> Just (ga :< z, y)
 
 -- find one of the user's variables by what they call it
-what's :: String -> AM Syn
+what's :: String -> AM (Either (Nom, [Sch]) (Syn, Tm))
 what's x = do
   ga <- gamma
   (e, mga) <- go ga
@@ -199,16 +207,24 @@ what's x = do
     Just ga -> setGamma ga
   return e
  where
-  go :: Context -> AM (Syn, Maybe Context)
+  go :: Context -> AM (Either (Nom, [Sch]) (Syn, Tm), Maybe Context)
   go B0 = gripe (Scope x)
-  go (_ :< Bind p (User y)) | x == y = return (TP p, Nothing)
-  go ga@(_ :< ImplicitQuantifier) = do
-    xTp <- (, Hide Type) <$> fresh "Ty"
-    xp  <- (, Hide (TE (TP xTp)))  <$> fresh x
-    return (TP xp, Just (ga :< Bind xTp Hole :< Bind xp (User x)))
+  go (_ :< Bind p@(_, Hide ty) (User y)) | x == y =
+    return (Right (TP p, ty), Nothing)
+  go ga@(_ :< ImplicitQuantifier) = case decl ga of
+    Just nsch -> return (Left nsch, Nothing)
+    Nothing -> do
+      xTp <- (, Hide Type) <$> fresh "Ty"
+      let xTy = TE (TP xTp)
+      xp  <- (, Hide xTy)  <$> fresh x
+      return (Right (TP xp, xTy), Just (ga :< Bind xTp Hole :< Bind xp (User x)))
+  go (ga :< Declare y yn sch) | x == y = return (Left (yn, [sch]), Nothing)
   go (ga :< z) = do
     (e, mga) <- go ga
     return (e, (:< z) <$> mga)
+  decl (ga :< Declare y yn sch) | x == y = Just (yn, [sch])
+  decl (ga :< _) = decl ga
+  decl B0 = Nothing
 
 -- finding one of ours
 nomBKind :: Nom -> AM BKind
@@ -262,3 +278,19 @@ pushOutDoor x = (go <$> gamma) >>= setGamma where
   go B0               = B0 :< x  -- heaven forfend
   go (ga :< DoorStop) = ga :< x :< DoorStop
   go (ga :< z)        = go ga :< z
+
+
+------------------------------------------------------------------------------
+--  Programming Problems
+------------------------------------------------------------------------------
+
+data Proglem = Proglem
+  { localCx  :: Context
+  , fNom     :: Nom
+  , leftImpl :: [(Tm, Tm)] -- term-type pairs for implicit arguments
+  , leftSatu :: [(Tm, Tm)] -- ditto scheme arguments
+  , leftAppl :: [(Tm, Tm)] -- ditto for application arguments
+  , rightTy  :: Tm         -- return type
+  } deriving Show
+
+

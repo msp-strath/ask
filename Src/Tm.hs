@@ -43,6 +43,7 @@ data Chk s
 data Syn
   = TV Int              -- de Bruijn index
   | TP (Nom, Hide Tm)   -- named var, with cached type
+  | TF (Nom, Hide Sch) [Tm] [Tm] -- declared function, saturated for its scheme
   | Tm ::: Tm           -- radical
   | Syn :$ Tm           -- elimination
   deriving (Show, Eq)
@@ -81,9 +82,19 @@ data Pat
 data Tel
   = Ex Tm (Bind Tel)       -- implicit existential
   | (String, Tm) :*: Tel   -- named explicit fields
-  | Pr Tm                  -- proof obligation, e.g., TRUE
+  | Pr [Tm]                -- proof obligations
   deriving Show
 infixr 6 :*:
+
+
+------------------------------------------------------------------------------
+--  Type Schemes
+------------------------------------------------------------------------------
+
+data Sch
+  = Al Tm (Bind Sch)
+  | [(String, Tm)] :>> Tm
+  deriving Show
 
 
 ------------------------------------------------------------------------------
@@ -116,10 +127,12 @@ instance Thin Syn where
   (t ::: _T) <^> th = (t <^> th) ::: (_T <^> th)
   (e :$ s) <^> th = (e <^> th) :$ (s <^> th)
   TP x <^> th = TP x
+  TF f is as <^> th = TF f (is <^> th) (as <^> th)
   thicken th (TV i) = TV <$> thicken th i
   thicken th (t ::: _T) = (:::) <$> thicken th t <*> thicken th _T
   thicken th (e :$ s) = (:$) <$> thicken th e <*> thicken th s
   thicken th (TP x) = pure (TP x)
+  thicken th (TF f is as) = TF f <$> thicken th is <*> thicken th as
 
 instance Thin s => Thin (Bind s) where
   K s <^> th = K (s <^> th)
@@ -138,6 +151,14 @@ instance Thin Tel where
   thicken th (Ex s b)       = Ex <$> thicken th s <*> thicken th b
   thicken th ((x, s) :*: t) = (:*:) <$> ((x,) <$> thicken th s) <*> thicken th t
   thicken th (Pr p)         = Pr <$> thicken th p
+
+instance Thin Sch where
+  Al s t <^> th = Al (s <^> th) (t <^> th)
+  (ss :>> t) <^> th = map (id *** (<^> th)) ss :>> (t <^> th)
+  thicken th (Al s t) = Al <$> thicken th s <*> thicken th t
+  thicken th (ss :>> t) = (:>>)
+    <$> traverse (\ (x, s) -> (x,) <$> thicken th s) ss
+    <*> thicken th t
 
 instance Thin Subgoal where
   PROVE g   <^> th = PROVE (g <^> th)
@@ -193,6 +214,7 @@ instance (Stan s, Stan t) => Stan (s, t) where
 instance Stan Syn where
   stan ms (t ::: _T) = stan ms t ::: stan ms _T
   stan ms (e :$ s) = stan ms e :$ stan ms s
+  stan ms (TF f is as) = TF f (stan ms is) (stan ms as)
   stan ms e = e
   sbst u es (TV i) = sg !! i where
     sg = [TV i | i <- [0 .. (u - 1)]]
@@ -200,10 +222,12 @@ instance Stan Syn where
          [TV i | i <- [u ..]]
   sbst u es (t ::: _T) = sbst u es t ::: sbst u es _T
   sbst u es (e :$ s) = sbst u es e :$ sbst u es s
+  sbst u es (TF f is as) = TF f (sbst u es is) (sbst u es as) 
   sbst u es e = e
   abst x i (TP (y, _)) | x == y = TV i <$ tell (Any True)
   abst x i (t ::: _T) = (:::) <$> abst x i t <*> abst x i _T
   abst x i (e :$ s) = (:$) <$> abst x i e <*> abst x i s
+  abst x i (TF f is as) = TF f <$> abst x i is <*> abst x i as
   abst x i e = pure e
 
 instance Stan Tm where
@@ -243,6 +267,16 @@ instance Stan Tel where
   abst x i (Ex s b) = Ex <$> abst x i s <*> abst x i b
   abst x i ((y, s) :*: t) = (:*:) <$> ((y,) <$> abst x i s) <*> abst x i t
 
+instance Stan Sch where
+  stan ms (Al s t) = Al (stan ms s) (stan ms t)
+  stan ms (ss :>> t) = map (id *** stan ms) ss :>> stan ms t
+  sbst u es (Al s t) = Al (sbst u es s) (sbst u es t)
+  sbst u es (ss :>> t) = map (id *** sbst u es) ss :>> sbst u es t
+  abst x i (Al s t) = Al <$> abst x i s <*> abst x i t
+  abst x i (ss :>> t) = (:>>)
+    <$> traverse (\ (y, s) -> (y,) <$> abst x i s) ss
+    <*> abst x i t
+
 instance Stan Subgoal where
   stan ms (PROVE g)   = PROVE (stan ms g)
   stan ms (GIVEN h g) = GIVEN (stan ms h) (stan ms g)
@@ -270,6 +304,7 @@ instance MDep Tm where
 instance MDep Syn where
   mDep x (t ::: ty) = mDep x t || mDep x ty
   mDep x (f :$ s) = mDep x f || mDep x s
+  mDep x (TF _ is as) = mDep x is || mDep x as
   mDep x _ = False
 
 instance MDep x => MDep [x] where

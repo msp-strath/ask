@@ -50,16 +50,43 @@ upsilon :: Syn -> Tm
 upsilon (t ::: _) = t
 upsilon e = TE e
 
+fnarg :: Syn -> [Tm] -> Maybe (Nom, [Tm], [Tm], [Tm])
+fnarg (e :$ s) ss = fnarg e (s : ss)
+fnarg (TF (f, _) is as) ss = Just (f, is, as, ss)
+fnarg _        _  = Nothing
+
 hnfSyn :: Syn -> AM Syn
-hnfSyn e@(TP (x, Hide ty)) = do
+hnfSyn e = case fnarg e [] of
+  Nothing -> hnfSyn' e
+  Just (f, is, as, ss) ->
+    (concat <$> (gamma >>= traverse (reds f (is ++ as ++ ss)))) >>= \case
+    []     -> hnfSyn' e
+    e : _  -> hnfSyn' e
+ where
+  reds x ss ((y, ps) :=: e) | x == y =
+    cope (do
+        (m, ss) <- snarf [] ps ss
+        return [foldl (:$) (stan m e) ss]
+      )
+      (\ gr -> return [])
+      return
+  reds _ _ _ = return []
+  snarf m [] ss = return (m, ss)
+  snarf m (p : ps) (s : ss) = do
+    m' <- maAM (p, s)
+    snarf (m' ++ m) ps ss
+  snarf _ _ _ = gripe FAIL
+
+hnfSyn' :: Syn -> AM Syn
+hnfSyn' e@(TP (x, Hide ty)) = do
   nomBKind x >>= \case
     Defn t -> return (t ::: ty)
     _ -> return e
-hnfSyn (t ::: ty) = do
+hnfSyn' (t ::: ty) = do
   t <- hnf t
   ty <- hnf ty
   return (t ::: ty)
-hnfSyn (f :$ s) = hnfSyn f >>= \case
+hnfSyn' (f :$ s) = hnfSyn f >>= \case
   (TB b ::: TC "->" [dom, ran]) -> return ((b // (s ::: dom)) ::: ran)
   f -> return (f :$ s)
 
@@ -154,30 +181,37 @@ elabTmR ty a = ((`Our` a)) <$> elabTm ty a
 
 elabTm :: Tm -> Appl -> AM Tm
 elabTm ty (_, a) | track (show ty ++ " on " ++ show a) False = undefined
-elabTm ty (_, (t, _, y) :$$ ras) = case (t, y) of
-  _ | t == Lid || (t, y) == (Sym, "::") -> do
-    (e, sy) <- elabSyn y ras
-    subtype sy ty
-    return $ TE e
-  (Und, _) -> do
-    guard $ null ras
-    x <- hole ty
-    return (TE x)
-  (t, _) | elem t [Uid, Sym] -> do
-    tel <- constructor ty y
-    fst <$> elabVec y tel ras
-  _ -> gripe FAIL
+elabTm ty (_, (t, _, y) :$$ ras) = do
+  ga <- gamma
+  case (t, y) of
+    _ | t == Lid
+      || (t, y) == (Sym, "::")
+      || any declared ga -> do
+      (e, sy) <- elabSyn y ras
+      subtype sy ty
+      return $ TE e
+    (Und, _) -> do
+      guard $ null ras
+      x <- hole ty
+      return (TE x)
+    (t, _) | elem t [Uid, Sym] -> do
+      tel <- constructor ty y
+      fst <$> elabVec y tel ras
+    _ -> gripe FAIL
+ where
+  declared (Declare f _ _) = f == y
+  declared _ = False
 
 elabVec :: String -> Tel -> [Appl] -> AM (Tm, Matching)
 elabVec con tel as = do
-  (ss, sch, po) <- cope (specialise tel as)
+  (ss, sch, pos) <- cope (specialise tel as)
     (\ _ -> gripe (WrongNumOfArgs con (ari tel) as))
     return
   m <- argChk [] sch
-  demand (PROVE po)
+  traverse (demand . PROVE) pos
   return (stan m $ TC con ss, m)
  where
-  specialise :: Tel -> [Appl] -> AM ([Tm], [((String, Tm), Appl)], Tm)
+  specialise :: Tel -> [Appl] -> AM ([Tm], [((String, Tm), Appl)], [Tm])
   specialise (Ex s b) as = do
     x <- hole s
     (ts, sch, po) <- specialise (b // x) as
@@ -185,7 +219,7 @@ elabVec con tel as = do
   specialise ((x, s) :*: tel) (a : as) = do
     (ts, sch, po) <- specialise tel as
     return (TM x [] : ts, topInsert ((x, s), a) sch, po)
-  specialise (Pr po) [] = return ([], [], po)
+  specialise (Pr pos) [] = return ([], [], pos)
   specialise _ _ = gripe FAIL
   ari :: Tel -> Int
   ari (Ex s (K b)) = ari b
@@ -204,16 +238,35 @@ elabSyn "::" (tm : ty : as) = do
   ty <- elabTm Type ty
   tm <- elabTm ty tm
   elabSpine (tm ::: ty, ty) as
-elabSyn f as = do
-  f@(TP (_, Hide t)) <- what's f
-  elabSpine (f, t) as
+elabSyn f as = what's f >>= \case
+  Right ety -> elabSpine ety as
+  Left (n, schs) ->
+    foldr (\ sch p -> elabFun (n, Hide sch) B0 sch as <|> p) empty schs
+   
 
 elabSpine :: (Syn, Tm) -> [Appl] -> AM (Syn, Tm)
-elabSpine fsy [] = return fsy
+elabSpine fsy [] = track (show fsy) $ return fsy
 elabSpine (f, sy) (a : as) = do
   (dom, ran) <- makeFun sy
   s <- elabTm dom a
   elabSpine (f :$ s, ran) as
+
+elabFun :: (Nom, Hide Sch) -> Bwd Tm -> Sch -> [Appl] -> AM (Syn, Tm)
+elabFun f az (Al a s) as = do
+  x <- hole a
+  elabFun f (az :< TE x) (s // x) as
+elabFun f az (iss :>> t) as = do
+  (schd, bs) <- snarf iss as
+  m <- argChk [] schd
+  elabSpine (TF f (az <>> []) [t | (i, _) <- iss, (j, t) <- m, i == j], stan m t) bs
+ where
+  snarf :: [(String, Tm)] -> [Appl] -> AM ([((String, Tm), Appl)], [Appl])
+  snarf [] as = return ([], as)
+  snarf _  [] = gripe FAIL
+  snarf (xty : xtys) (a : as) = do
+    (schd, bs) <- snarf xtys as
+    return (topInsert (xty, a) schd, bs)
+
 
 
 ------------------------------------------------------------------------------
@@ -310,6 +363,8 @@ instance PDep Syn where
   pDep x (TP (y, _)) = return $ x == y
   pDep x (t ::: ty) = (||) <$> pDep x t <*> pDep x ty
   pDep x (e :$ s) =  (||) <$> pDep x e <*> pDep x s
+  pDep x (TF _ is as) = (||) <$> pDep x is <*> pDep x as
+  pDep x _ = return False
 
 instance PDep t => PDep [t] where
   pDep x ts = do
@@ -340,44 +395,65 @@ elabTel :: [Appl] -> AM Tel
 elabTel as = do
   doorStop
   phs <- placeHolders as
+  lox <- doorStep
+  telify (map fst phs) lox
+
+placeHolders :: [Appl] -> AM [(String, Tm)]
+placeHolders as = do
+  let decolonise i (_, (Sym, _, "::") :$$ [(_, (Lid, _, x) :$$ []) , ty]) =
+        (x, ty)
+      decolonise i ty = ("#" ++ show i, ty)
+  let phs  = zipWith decolonise [0..] as
+  guard $ nodup (map fst phs)
   sch <- mayhem $ map fst <$> topSort (map (, ()) phs)
-  for sch $ \ (x, a) -> do
+  xts <- for sch $ \ (x, a) -> do
     ty <- elabTm Type a
     xn <- fresh x
     push (Bind (xn, Hide ty) (User x))
-  lox <- doorStep
-  telify (map fst phs) lox
- where
-  placeHolders :: [Appl] -> AM [(String, Appl)]
-  placeHolders as = do
-    let decolonise i (_, (Sym, _, "::") :$$ [(_, (Lid, _, x) :$$ []) , ty]) =
-          (x, ty)
-        decolonise i ty = ("#" ++ show i, ty)
-    let phs  = zipWith decolonise [0..] as
-    guard $ nodup (map fst phs)
-    return phs 
+    return (x, ty)
+  for phs $ \ (x, _) -> (x,) <$> mayhem (lookup x xts)
 
 telify :: [String]  -- the explicit parameter order
        -> [CxE]     -- the local context (as returned by doorStep)
        -> AM Tel    -- the telescope
-telify vs lox = go vs [] lox where
-  go vs ps [] = do
+telify vs lox = go [] lox where
+  go ps [] = do
     xs <- traverse (\ x -> mayhem $ (x,) <$> (snd <$> lookup x ps)) vs
-    return $ foldr (:*:) (Pr TRUE) xs
-  go vs ps (Bind (xp, Hide ty) bk : lox) = case bk of
-    Defn t -> do
-      tel <- go vs ps lox
-      return $ e4p (xp, t ::: ty) tel
+    return $ foldr (:*:) (Pr []) xs
+  go ps (Bind (xp, Hide ty) bk : lox) = case bk of
+    Defn t -> e4p (xp, t ::: ty) <$> go ps lox
     Hole -> do
       bs <- traverse (\ (_, (xp, _)) -> pDep xp ty) ps
       guard $ all not bs
-      Ex ty <$> ((xp \\) <$> go vs ps lox)
-    User x -> do
-      tel <- go vs ((x, (xp, ty)) : ps) lox
-      return $ e4p (xp, TM x [] ::: ty) tel
-  go vs ps ((_ ::> _) : lox) = go vs ps lox
-  go _ _ _ = gripe FAIL
-    
+      Ex ty <$> ((xp \\) <$> go ps lox)
+    User x -> e4p (xp, TM x [] ::: ty) <$> go ((x, (xp, ty)) : ps) lox
+  go ps ((_ ::> _) : lox) = go ps lox
+  go _ _ = gripe FAIL
+       
+schemify :: [String]  -- the explicit parameter order
+         -> [CxE]     -- the local context (as returned by doorStep)
+         -> Tm        -- the return type
+         -> AM Sch    -- the type scheme
+schemify vs lox rt = go [] lox where
+  go ps [] = do
+    xs <- traverse (\ x -> mayhem $ (x,) <$> (snd <$> lookup x ps)) vs
+    return $ xs :>> rt
+  go ps (Bind (xp, Hide ty) bk : lox) = case bk of
+    Defn t -> e4p (xp, t ::: ty) <$> go ps lox
+    Hole -> do
+      bs <- traverse (\ (_, (xp, _)) -> pDep xp ty) ps
+      guard $ all not bs
+      Al ty <$> ((xp \\) <$> go ps lox)
+    User x
+      | x `elem` vs ->
+        e4p (xp, TM x [] ::: ty) <$> go ((x, (xp, ty)) : ps) lox
+      | otherwise -> do
+        bs <- traverse (\ (_, (xp, _)) -> pDep xp ty) ps
+        guard $ all not bs
+        Al ty <$> ((xp \\) <$> go ps lox)
+  go ps ((_ ::> _) : lox) = go ps lox
+  go _ _ = gripe FAIL
+       
     
 ------------------------------------------------------------------------------
 --  Binding a Parameter List
@@ -404,10 +480,22 @@ bindParam as = do
 
 
 ------------------------------------------------------------------------------
+--  Duplication Freeness
+------------------------------------------------------------------------------
+
+nodup :: Eq x => [x] -> Bool
+nodup [] = True
+nodup (x : xs)
+  | elem x xs = False
+  | otherwise = nodup xs
+
+
+------------------------------------------------------------------------------
 --  Constructor lookup
 ------------------------------------------------------------------------------
 
 constructor :: Tm -> Con -> AM Tel
+constructor ty con | track (show con ++ " ::? " ++ show ty) False = undefined
 constructor ty con = do
   (d, ss) <- hnf ty >>= \case
     TC d ss -> return (d, ss)
@@ -421,15 +509,7 @@ constructor ty con = do
   try d ss c ((d', ps) ::> (c', tel)) | d == d' && c == c' = do
     m <- concat <$> ((mayhem $ halfZip ps ss) >>= traverse maAM)
     return [stan m tel]
+  try d ss c (Data _ de) = fold <$> traverse (try d ss c) de
   try _ _ _ _ = return []
 
 
-------------------------------------------------------------------------------
---  Duplication Freeness
-------------------------------------------------------------------------------
-
-nodup :: Eq x => [x] -> Bool
-nodup [] = True
-nodup (x : xs)
-  | elem x xs = False
-  | otherwise = nodup xs
