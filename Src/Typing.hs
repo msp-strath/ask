@@ -101,6 +101,11 @@ hnfSyn' (f :$ s) = hnfSyn f >>= \case
     _ -> False
   return y
 
+norm :: Tm -> AM Tm     -- this is a fake
+norm t = hnf t >>= \case
+  TC c ts -> TC c <$> traverse norm ts
+  t -> return t
+
 equal :: Tm -> (Tm, Tm) -> AM ()
 equal ty (x, y) = do
   ty <- hnf ty
@@ -322,7 +327,7 @@ unify ty a b = do  -- pay more attention to types
       unifies tel as bs
     (TE (TP xp), t) -> make xp t
     (s, TE (TP yp)) -> make yp s
-    _ -> gripe FAIL
+    _ -> track (show a ++ " /= " ++ show b) $ gripe FAIL
 
 unifies :: Tel -> [Tm] -> [Tm] -> AM ()
 unifies tel as bs = prepare tel as bs >>= execute [] where

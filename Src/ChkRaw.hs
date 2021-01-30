@@ -70,9 +70,11 @@ chkProg p gr mr ps src@(h,b) = do
     Stub -> pure Stub
     Is a -> do
       doorStop
+      True <- tracy ("IS " ++ show a ++ " ?") $ return True
       push $ RecShadow (uName p)
       traverse push (localCx p)
       a@(Our t _) <- elabTmR (rightTy p) a
+      True <- tracy ("IS SO " ++ show t) $ return True
       (PC _ ps, sb) <- patify $ TC "" (map fst (leftImpl p ++ leftSatu p ++ leftAppl p))
       doorStep
       pushOutDoor $ (fNom p, ps) :=: rfold e4p sb (t ::: rightTy p)
@@ -569,7 +571,25 @@ chkSig la@(_, (t, _, f@(c : _)) :$$ as) rty
   fn <- fresh f
   push $ Declare f fn sch
   return ()
-    
+
+chkTest :: Appl -> Maybe Appl -> AM String
+chkTest (ls, (_,_,f) :$$ as) mv = do
+  (e, sy) <- elabSyn f as
+  case mv of
+    Just t@(rs, _) -> do
+      v <- elabTm sy t
+      b <- cope (equal sy (TE e, v)) (\ _ -> return False) (\ _ -> return True)
+      if b
+        then return . ("tested " ++) . rfold lout ls . (" = " ++) . rfold lout rs $ ""
+        else do
+          r <- ppTm AllOK v
+          return . ("tested " ++) . rfold lout ls . (" = " ++) . (r ++) .
+            ("{- not " ++) . rfold lout rs $ " -}"
+    Nothing -> do
+      v <- norm (TE e)
+      r <- ppTm AllOK v
+      return . ("tested " ++) . rfold lout ls . (" = " ++) $ r
+
 askRawDecl :: (RawDecl, [LexL]) -> AM String
 askRawDecl (RawProof (Make Prf gr mr () ps src), ls) = id
   <$ doorStop
@@ -613,6 +633,12 @@ askRawDecl (RawSig la ra, ls) =
     e <- ppGripe gr
     return $ "{- " ++ e ++ "\n" ++ rfold lout ls "\n-}")
   (\ _ -> return $ rfold lout ls "")
+askRawDecl (RawTest e mv, ls) =
+  cope (chkTest e mv)
+  (\ gr -> do
+    e <- ppGripe gr
+    return $ "{- " ++ e ++ "\n" ++ rfold lout ls "\n-}")
+  return
 askRawDecl (RawSewage, []) = return ""
 askRawDecl (RawSewage, ls) = return $ "{- don't ask\n" ++ rfold lout ls "\n-}"
 askRawDecl (_, ls) = return $ rfold lout ls ""

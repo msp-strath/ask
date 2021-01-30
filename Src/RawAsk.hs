@@ -33,6 +33,7 @@ data RawDecl
   | RawProp Appl (Bloc RawIntro)
   | RawData Appl [Appl]
   | RawSig Appl Appl
+  | RawTest Appl (Maybe Appl)
   | RawProof (Make () Appl)
   deriving Show
   
@@ -126,6 +127,9 @@ pDecl = good <* eol where
      <|> uncurry RawProp <$ the Key "prop" <*> pProp
      <|> uncurry RawData <$ the Key "data" <*> pData
      <|> RawSig <$> pAppl ["::", "="] <* spd (the Sym "::") <*> pAppl []
+     <|> RawTest <$ (the Key "test" <|> the Key "tested") <* spc
+           <*> pAppl ["="] <*>
+           (Just <$ spd (the Sym "=") <*> pAppl [] <|> pure Nothing)
      <|> RawProof <$> pMake
   agree (ft, at) = at <$ guard (all id $ M.intersectionWith (==) at ft)
 
