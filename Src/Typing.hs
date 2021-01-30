@@ -282,6 +282,7 @@ elabFun f az (iss :>> t) as = do
 -- I'm very far from convinced that I'm doing this right.
 
 subtype :: Tm -> Tm -> AM ()
+subtype s t | track ("SOOTY " ++ show s ++ " " ++ show t) False = undefined
 subtype (TC "->" [s0, t0]) u = do
   (s1, t1) <- makeFun u
   subtype s1 s0
@@ -347,9 +348,14 @@ unifies tel as bs = prepare tel as bs >>= execute [] where
 
 make :: (Nom, Hide Tm) -> Tm -> AM ()
 make (x, _) (TE (TP (y, _))) | x == y = return ()
-make (x, Hide ty) t = do
+make (x, _) t | track ("MAKE " ++ show x ++ " = " ++ show t) False = undefined
+make xp@(x, Hide ty) t = do
   nomBKind x >>= \case
-    User _ -> gripe FAIL
+    User _ -> case t of
+      TE (TP yp@(y, _)) -> nomBKind y >>= \case
+        Hole -> make yp (TE (TP xp))
+        _ -> gripe FAIL
+      _ -> gripe FAIL
     Defn s -> unify ty s t
     Hole -> do
       ga <- gamma
