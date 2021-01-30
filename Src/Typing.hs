@@ -525,7 +525,12 @@ constructor :: Tm -> Con -> AM Tel
 constructor ty con = do
   (d, ss) <- hnf ty >>= \case
     TC d ss -> return (d, ss)
-    _ -> gripe (NonCanonicalType ty con)
+    ty -> (foldMap cand <$> gamma) >>= \case
+      [(p, tel)] -> do
+        (TC d ss, m) <- splat Type p
+        subtype (TC d ss) ty
+        return (d, ss)
+      _ -> gripe $ NonCanonicalType ty con
   (fold <$> (gamma >>= traverse (try d ss con))) >>= \case
     [] -> gripe (DoesNotMake con ty)
     _ : _ : _ -> gripe (OverOverload con)
@@ -538,6 +543,30 @@ constructor ty con = do
   try d ss c (Data _ de) =
     concat <$> traverse (try d ss c) de
   try _ _ _ _ = return []
+  cand :: CxE -> [(Pat, Tel)]
+  cand ((c, ps) ::> (k, tel)) | k == con = [(PC c ps, tel)]
+  cand (Data _ de) = foldMap cand de
+  cand _ = []
+  splat :: Tm -> Pat -> AM (Tm, Matching)
+  splat ty (PM x _{- er? -}) = do
+    y <- hole ty
+    return (TE y, [(x, TE y)])
+  splat ty (PC c ps) = do
+    tel <- constructor ty c
+    (ts, m) <- splats [] tel ps
+    return (TC c ts, m)
+  splat _ _ = gripe FAIL
+  splats m (Ex s tel) (p : ps) = do
+    x <- hole s
+    (ts, m) <- splats m (tel // x) ps
+    return (TE x : ts, m)
+  splats m ((x, s) :*: tel) (p : ps) = do
+    -- this is broken in general
+    (t, m) <- splat (stan m s) p
+    (ts, m) <- splats m tel ps
+    return (t : ts, m)
+  splats m (Pr _) [] = return ([], m)
+  splats _ _ _ = gripe FAIL
 
 -- FIXME: don't assume quite so casually that things are covariant functors
 weeer :: Con  -- type constructor to be monkeyed
