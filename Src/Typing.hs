@@ -33,7 +33,7 @@ import Ask.Src.Tm
 import Ask.Src.Glueing
 import Ask.Src.Context
 
-track = const id
+track = trace
 
 
 ------------------------------------------------------------------------------
@@ -53,15 +53,17 @@ upsilon e = TE e
 fnarg :: Syn -> [Tm] -> Maybe (Nom, [Tm], [Tm], [Tm])
 fnarg (e :$ s) ss = fnarg e (s : ss)
 fnarg (TF (f, _) is as) ss = Just (f, is, as, ss)
+fnarg (TE e ::: _) ss = fnarg e ss
 fnarg _        _  = Nothing
 
 hnfSyn :: Syn -> AM Syn
+hnfSyn e | track ("HNFSYN " ++ show e) False = undefined
 hnfSyn e = case fnarg e [] of
   Nothing -> hnfSyn' e
   Just (f, is, as, ss) ->
     (concat <$> (gamma >>= traverse (reds f (is ++ as ++ ss)))) >>= \case
-    []     -> hnfSyn' e
-    e : _  -> hnfSyn' e
+    []     -> return e
+    e : _  -> hnfSyn e
  where
   reds x ss ((y, ps) :=: e) | x == y =
     cope (do
@@ -79,9 +81,15 @@ hnfSyn e = case fnarg e [] of
 
 hnfSyn' :: Syn -> AM Syn
 hnfSyn' e@(TP (x, Hide ty)) = do
-  nomBKind x >>= \case
-    Defn t -> return (t ::: ty)
-    _ -> return e
+  cope
+    (nomBKind x >>= \case
+    Defn t -> do
+      t <- hnf t
+      ty <- hnf ty
+      return (t ::: ty)
+    _ -> return e)
+    (\ _ -> return e)
+    return
 hnfSyn' (t ::: ty) = do
   t <- hnf t
   ty <- hnf ty
@@ -89,6 +97,7 @@ hnfSyn' (t ::: ty) = do
 hnfSyn' (f :$ s) = hnfSyn f >>= \case
   (TB b ::: TC "->" [dom, ran]) -> return ((b // (s ::: dom)) ::: ran)
   f -> return (f :$ s)
+hnfSyn' e | track ("HNFSYN " ++ show e) True = return e
 
 (|:-) :: (String, Tm) -> (Syn -> AM x) -> AM x
 (x, s) |:- p = do
