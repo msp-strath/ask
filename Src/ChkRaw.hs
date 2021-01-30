@@ -28,7 +28,7 @@ import Ask.Src.Printing
 import Ask.Src.HardwiredRules
 import Ask.Src.Progging
 
-tracy = trace
+tracy = const id
 
 type Anno =
   ( Status
@@ -69,6 +69,7 @@ chkProg p gr mr ps src@(h,b) = do
     Stub -> pure Stub
     Is a -> do
       doorStop
+      push $ RecShadow (uName p)
       traverse push (localCx p)
       a@(Our t _) <- elabTmR (rightTy p) a
       (PC _ ps, sb) <- patify $ TC "" (map fst (leftImpl p ++ leftSatu p ++ leftAppl p))
@@ -84,10 +85,14 @@ chkProg p gr mr ps src@(h,b) = do
       tels <- conSplit ty
       traverse (expect xn ty p) tels
       pure (From (Our (TE e) a))
+    Ind xs -> do
+      p <- inductively p xs
+      push (Expect p)
+      pure $ Ind xs
     _ -> gripe FAIL
   ns <- chkSubProofs ps
-  let proven = case m of {Stub -> False; _ -> all happy ns}
-  return $ Make Def (Your gr) m (Keep, proven) ns src
+  let defined = case m of {Stub -> False; _ -> all happy ns}
+  return $ Make Def (Your gr) m (Keep, defined) ns src
  where
   expect :: Nom -> Tm -> Proglem -> (Con, Tel) -> AM ()
   expect xn ty p (c, tel) = do
@@ -125,8 +130,12 @@ chkProg p gr mr ps src@(h,b) = do
     bungle ga sch xz y ((x, s) :*: tel) =
       bungle ga (topInsert ((x, s), ()) sch) (xz :< TM x []) y tel
     sbpg :: [(Nom, Syn)] -> Proglem -> Proglem
-    sbpg sb (Proglem de f li ls la ty) =
-      Proglem de f (rfold e4p sb li) (rfold e4p sb ls) (rfold e4p sb la) (rfold e4p sb ty)
+    sbpg sb (Proglem de f u li ls la ty) =
+      Proglem de f u
+        (rfold e4p sb li)
+        (rfold e4p sb ls)
+        (rfold e4p sb la)
+        (rfold e4p sb ty)
 
 -- this type is highly provisional
 chkProof
@@ -171,10 +180,10 @@ chkSubProofs
   -> AM (Bloc (SubMake Anno TmR))   -- reconstruction
 chkSubProofs ps = do
   ss <- demands
-  ps <- traverse validSubProof ps
-  (qs, us) <- cover ss (fmap (False,) ps)
+  (qs, us) <- traverse validSubProof ps >>= cover ss
+  eps <- gamma >>= sprog
   vs <- extra us
-  return $ glom (fmap squish qs) vs
+  return $ glom (fmap squish qs) (eps ++ vs)
  where
   cover
     :: [Subgoal]  -- subgoals to cover
@@ -204,6 +213,45 @@ chkSubProofs ps = do
   squish (False, gs ::- Make k g m (Keep, _) ss src) =
     gs ::- Make k g m (Junk Surplus, True) ss src
   squish (_, q) = q
+  sprog :: Context -> AM [SubMake Anno TmR]
+  sprog ga = do
+    (ga, ps) <- go ga []
+    setGamma ga
+    return ps
+   where
+    go :: Context -> [SubMake Anno TmR] -> AM (Context, [SubMake Anno TmR])
+    go B0 ps = return (B0, ps)
+    go ga@(_ :< DoorStop) ps = return (ga, ps)
+    go (ga :< Expect p) ps = go ga (blep p : ps)
+    go (ga :< z) ps = ((:< z) *** id) <$> go ga ps
+    blep :: Proglem -> SubMake Anno TmR
+    blep p = ([], []) ::- -- bad hack on its way!
+      Make Def (My (TC (uName p) (fst (frob [] (map fst (leftSatu p ++ leftAppl p))))))
+        Stub (Need, False) ([] :-/ Stop) ([], [])
+      where
+        frob zs [] = ([], zs)
+        frob zs (TC c ts : us) = case frob zs ts of
+          (ts, zs) -> case frob zs us of
+            (us, zs) -> (TC c ts : us, zs)
+        frob zs (TE (TP (x, _)) : us) = let
+            y = case foldMap (dubd x) (localCx p) of
+                  [y] -> y
+                  _   -> fst (last x)
+            z = grob (krob y) Nothing zs
+          in case frob (z : zs) us of
+            (us, zs) -> (TC z [] : us, zs)
+        krob [] = "x"
+        krob (c : cs)
+          | isLower c = c : filter isIdTaily cs
+          | isUpper c = toLower c : filter isIdTaily cs
+          | otherwise = krob cs
+        grob x i zs = if elem y zs then grob x j zs else y where
+          (y, j) = case i of
+            Nothing -> (x, Just 0)
+            Just n -> (x ++ show n, Just (n + 1))
+        dubd xn (Bind (yn, _) (User y)) | xn == yn = [y]
+        dubd xn _ = []
+
   extra :: [Subgoal] -> AM [SubMake Anno TmR]
   extra [] = return []
   extra (u : us) = cope (subgoal u obvious)
@@ -213,11 +261,6 @@ chkSubProofs ps = do
     =   given s
     <|> given FALSE
     <|> equal Prop (s, TRUE)
-    <|> case s of
-          TC "=" [_X, _Y, x, y] -> do
-            unify Type _X _Y
-            unify _X x y
-          _ -> gripe FAIL
             
   need (PROVE g) =
     ([], []) ::- Make Prf (My g) Stub (Need, False)
@@ -235,22 +278,34 @@ subgoal (PROVE g) k = k g
 
 validSubProof
   :: SubMake () Appl
-  -> AM (SubMake Anno TmR)
+  -> AM (Bool, SubMake Anno TmR)
 validSubProof ((srg, Given h : gs) ::- p@(Make k sg sm () sps src)) =
   cope (elabTm Prop h)
-    (\ gr -> return $ (srg, map (fmap Your) (Given h : gs)) ::-
+    (\ gr -> return $ (False, (srg, map (fmap Your) (Given h : gs)) ::-
       Make k (Your sg) (fmap Your sm) (Junk gr, True)
-        (fmap subPassive sps) src)
+        (fmap subPassive sps) src))
     $ \ ht -> do
-      (srg, gs) ::- p <- ht |- validSubProof ((srg, gs) ::- p)
-      return $ (srg, Given (Our ht h) : gs) ::- p
-validSubProof ((srg, []) ::- Make k sg sm () sps src) =
-  cope (guard (k == Prf) >> elabTmR Prop sg)
-    (\ gr -> return $ (srg, []) ::- Make k (Your sg) (fmap Your sm) (Junk gr, True)
-      (fmap subPassive sps) src)
-    $ \ sg -> ((srg, []) ::-) <$> chkProof sg sm sps src
-validSubProof (SubPGuff ls) = return $ SubPGuff ls
-
+      (b, (srg, gs) ::- p) <- ht |- validSubProof ((srg, gs) ::- p)
+      return $ (b, (srg, Given (Our ht h) : gs) ::- p)
+validSubProof ((srg, []) ::- Make Prf sg sm () sps src) =
+  cope (elabTmR Prop sg)
+    (\ gr -> return $ (False, (srg, []) ::- Make Prf (Your sg) (fmap Your sm)
+      (Junk gr, True) (fmap subPassive sps) src))
+    $ \ sg -> (False, ) <$> (((srg, []) ::-) <$> chkProof sg sm sps src)
+validSubProof ((srg, []) ::- Make Def sg@(_, (_, _, f) :$$ as) sm () sps src) = do
+  p <- gamma >>= expected f as
+  True <- tracy ("FOUND " ++ show p) $ return True
+  (True,) <$> (((srg, []) ::-) <$> chkProg p sg sm sps src)
+ where
+  expected f as B0 = gripe Surplus
+  expected f as (ga :< z) =
+    cope (do
+      Expect p <- return z
+      dubStep p f as
+    )
+    (\ gr -> expected f as ga <* push z)
+    (<$ setGamma ga)
+validSubProof (SubPGuff ls) = return $ (False, SubPGuff ls)
 
 fromSubs
   :: Tm      -- goal
@@ -526,8 +581,8 @@ askRawDecl (RawProof (Make Prf gr mr () ps src), ls) = id
 askRawDecl (RawProof (Make Def gr@(_, (_, _, f) :$$ as) mr () ps src), ls) = id
   <$ doorStop
   <*> cope (do
-      Left (fn, sch : _) <- what's f
-      p <- proglify fn sch
+      Left (fn, sch) <- what's f
+      p <- proglify fn (f, sch)
       p <- dubStep p f as
       True <- tracy (show p) $ return True
       bifoldMap id (($ "") . rfold lout) <$> 

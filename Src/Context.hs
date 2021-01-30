@@ -36,6 +36,7 @@ data CxE -- what sort of thing is in the context?
   | Bind (Nom, Hide Tm) BKind
   | (Nom, [Pat]) :=: Syn  -- computation rule
   | Declare String Nom Sch
+  | RecShadow String
   | ImplicitQuantifier
   | (Con, [Pat]) ::> (Con, Tel)  -- constructor declaration
   | ByRule Bool{- pukka intro?-} Rule
@@ -75,6 +76,7 @@ data Gripe
   | NotGiven Tm
   | NotEqual
   | NotARule Appl
+  | BadRec String
   | Mardiness
   | WrongNumOfArgs Con Int [Appl]
   | DoesNotMake Con Tm
@@ -198,7 +200,7 @@ pop test = do
     | otherwise = go ga >>= \ (ga, y) -> Just (ga :< z, y)
 
 -- find one of the user's variables by what they call it
-what's :: String -> AM (Either (Nom, [Sch]) (Syn, Tm))
+what's :: String -> AM (Either (Nom, Sch) (Syn, Tm))
 what's x = do
   ga <- gamma
   (e, mga) <- go ga
@@ -207,7 +209,7 @@ what's x = do
     Just ga -> setGamma ga
   return e
  where
-  go :: Context -> AM (Either (Nom, [Sch]) (Syn, Tm), Maybe Context)
+  go :: Context -> AM (Either (Nom, Sch) (Syn, Tm), Maybe Context)
   go B0 = gripe (Scope x)
   go (_ :< Bind p@(_, Hide ty) (User y)) | x == y =
     return (Right (TP p, ty), Nothing)
@@ -218,11 +220,12 @@ what's x = do
       let xTy = TE (TP xTp)
       xp  <- (, Hide xTy)  <$> fresh x
       return (Right (TP xp, xTy), Just (ga :< Bind xTp Hole :< Bind xp (User x)))
-  go (ga :< Declare y yn sch) | x == y = return (Left (yn, [sch]), Nothing)
+  go (ga :< RecShadow y) | x == y = gripe (BadRec x)
+  go (ga :< Declare y yn sch) | x == y = return (Left (yn, sch), Nothing)
   go (ga :< z) = do
     (e, mga) <- go ga
     return (e, (:< z) <$> mga)
-  decl (ga :< Declare y yn sch) | x == y = Just (yn, [sch])
+  decl (ga :< Declare y yn sch) | x == y = Just (yn, sch)
   decl (ga :< _) = decl ga
   decl B0 = Nothing
 
@@ -287,6 +290,7 @@ pushOutDoor x = (go <$> gamma) >>= setGamma where
 data Proglem = Proglem
   { localCx  :: Context
   , fNom     :: Nom
+  , uName    :: String
   , leftImpl :: [(Tm, Tm)] -- term-type pairs for implicit arguments
   , leftSatu :: [(Tm, Tm)] -- ditto scheme arguments
   , leftAppl :: [(Tm, Tm)] -- ditto for application arguments

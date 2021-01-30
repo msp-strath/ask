@@ -4,6 +4,7 @@ module Ask.Src.Printing where
 
 import Data.Char
 
+import Ask.Src.Hide
 import Ask.Src.Bwd
 import Ask.Src.Lexing
 import Ask.Src.RawAsk
@@ -85,6 +86,14 @@ ppEl spot (f :$ s) = do
   f <- ppEl Fun f
   s <-  ppTm Arg s
   return . pppa spot App $ f ++ " " ++ s
+ppEl spot (TF (f, Hide sch) ss ts) = do
+  ss <- return $ dump sch ss
+  ppTm spot (TC (fst (last f)) (ss ++ ts))
+  -- terrible hack
+ where
+  dump (Al a t) (s : ss) = dump (t // (s ::: a)) ss
+  dump _ ss = ss
+
 
 ppGripe :: Gripe -> AM String
 ppGripe Surplus = return "I don't see why you need this"

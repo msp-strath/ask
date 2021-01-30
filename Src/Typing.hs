@@ -240,9 +240,7 @@ elabSyn "::" (tm : ty : as) = do
   elabSpine (tm ::: ty, ty) as
 elabSyn f as = what's f >>= \case
   Right ety -> elabSpine ety as
-  Left (n, schs) ->
-    foldr (\ sch p -> elabFun (n, Hide sch) B0 sch as <|> p) empty schs
-   
+  Left (n, sch) -> elabFun (n, Hide sch) B0 sch as
 
 elabSpine :: (Syn, Tm) -> [Appl] -> AM (Syn, Tm)
 elabSpine fsy [] = track (show fsy) $ return fsy
@@ -252,6 +250,9 @@ elabSpine (f, sy) (a : as) = do
   elabSpine (f :$ s, ran) as
 
 elabFun :: (Nom, Hide Sch) -> Bwd Tm -> Sch -> [Appl] -> AM (Syn, Tm)
+elabFun (f, _) B0 sch as
+  | track ("FUN (" ++ show f ++ " :: " ++ show sch ++ ")" ++ show as) False
+  = undefined
 elabFun f az (Al a s) as = do
   x <- hole a
   elabFun f (az :< TE x) (s // x) as
@@ -273,8 +274,28 @@ elabFun f az (iss :>> t) as = do
 --  Subtyping
 ------------------------------------------------------------------------------
 
+-- I'm very far from convinced that I'm doing this right.
+
 subtype :: Tm -> Tm -> AM ()
+subtype (TC "->" [s0, t0]) u = do
+  (s1, t1) <- makeFun u
+  subtype s1 s0
+  subtype t0 t1
+subtype u (TC "->" [s1, t1]) = do
+  (s0, t0) <- makeFun u
+  subtype s1 s0
+  subtype t0 t1
+subtype (TC "$" [ty0, non0, num0]) (TC "$" [ty1, non1, num1]) = do
+  unify Type ty0 ty1
+  unify Zone non0 non1
+  greq num0 num1
+subtype (TC "$" [ty0, _, _]) ty1@(TC _ _) = unify Type ty0 ty1
 subtype got want = unify Type got want  -- not gonna last
+
+greq :: Tm -> Tm -> AM ()
+greq _ (TC "Z" []) = return ()
+greq (TC "S" [m]) (TC "S" [n]) = greq m n
+greq _ _ = gripe FAIL
 
 makeFun :: Tm -> AM (Tm, Tm)
 makeFun (TC "->" [dom, ran]) = return (dom, ran)
@@ -494,8 +515,13 @@ nodup (x : xs)
 --  Constructor lookup
 ------------------------------------------------------------------------------
 
+-- it is not safe to allow *construction* in sized types
+-- defined foo (n :: Nat) :: Nat induction n
+--   given foo (n :: Nat) :: Nat define foo n from n
+--     defined foo Z = Z
+--     defined foo (S n) = foo (S Z) -- no reason to believe Z is small enough
+
 constructor :: Tm -> Con -> AM Tel
-constructor ty con | track (show con ++ " ::? " ++ show ty) False = undefined
 constructor ty con = do
   (d, ss) <- hnf ty >>= \case
     TC d ss -> return (d, ss)
@@ -509,7 +535,38 @@ constructor ty con = do
   try d ss c ((d', ps) ::> (c', tel)) | d == d' && c == c' = do
     m <- concat <$> ((mayhem $ halfZip ps ss) >>= traverse maAM)
     return [stan m tel]
-  try d ss c (Data _ de) = fold <$> traverse (try d ss c) de
+  try d ss c (Data _ de) =
+    concat <$> traverse (try d ss c) de
   try _ _ _ _ = return []
 
+-- FIXME: don't assume quite so casually that things are covariant functors
+weeer :: Con  -- type constructor to be monkeyed
+      -> Tm   -- the nonce
+      -> Tm   -- the smaller size
+      -> Tel  -- the telescope of raw constructor arguments
+      -> Tel  -- the telescope of smaller constructor arguments
+weeer d non num (Ex a tel) = Ex a (fmap (weeer d non num) tel)
+weeer d non num ((x, s) :*: tel) = (x, hit s) :*: weeer d non num tel where
+  hit ty@(TC c ts)
+    | c == d = TC "$" [TC c (map hit ts), non, num]
+    | otherwise = TC c (map hit ts)
+  hit t = t
+weeer d non num (Pr pos) = Pr pos
 
+conSplit :: Tm -> AM [(Con, Tel)]
+conSplit t = do
+  z@(monkey, d, ts) <- case t of
+    TC "$" [TC d ts, non, num] -> return (weeer d non (TC "S" [num]), d, ts)
+    TC d ts -> return (id, d, ts)
+    _ -> gripe FAIL
+  (foldMap (\case {Data e de | d == e -> [de]; _ -> []}) <$> gamma) >>= \case
+    [de] -> concat <$> traverse (refine z) de
+ where
+  refine :: (Tel -> Tel, Con, [Tm]) -> CxE -> AM [(Con, Tel)]
+  refine (monkey, d, ts) ((e, ps) ::> (c, tel)) | d == e = cope (do
+    m <- concat <$> ((mayhem $ halfZip ps ts) >>= traverse maAM)
+    return [(c, stan m (monkey tel))]
+    )
+    (\ _ -> return [])
+    return
+  refine _ _ = return []

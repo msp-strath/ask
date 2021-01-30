@@ -60,6 +60,7 @@ pattern Prop      = TC "Prop" []
 pattern TRUE      = TC "True" []
 pattern FALSE     = TC "False" []
 pattern (:->) s t = TC "->" [s, t]
+pattern Zone      = TC "$$" []  -- a type which gets hypothetically inhabited
 
 type Nom = [(String, Int)]   -- names for parameters are chosen by the system
 

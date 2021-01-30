@@ -178,7 +178,7 @@ keywords :: [String]
 keywords =
   [ "case", "class", "instance", "data", "do", "if", "then", "else", "where", "let", "in", "of"
   , "module", "import", "deriving", "infix", "infixl", "infixr"
-  , "prop", "prove", "proven", "by", "from", "given", "induction", "define", "defined"
+  , "prop", "prove", "proven", "by", "from", "given", "inductively", "define", "defined"
   ]
 
 isIdTaily :: Char -> Bool

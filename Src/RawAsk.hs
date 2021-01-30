@@ -73,6 +73,7 @@ data Method t
   | From t
   | MGiven
   | Is t
+  | Ind [String]
   deriving (Show, Functor)
 
 data Given t
@@ -181,6 +182,8 @@ pMake = do
            Prf -> By   <$ the Key "by"   <* spc <*> pAppl []
               <|> MGiven <$ the Key "given"
            Def -> Is <$ the Sym "=" <* spc <*> pAppl []
+              <|> Ind <$ the Key "inductively" <* spc <*>
+                    sep (txt <$> kinda Lid) (spd (the Sym ","))
   pSubs = lol "where" pSub <|> pure ([] :-/ Stop)
   pSub = ((::-) <$> ext (pGivens <* spc) <*> pMake <* spc <* eol)
       ?> ((SubPGuff . fst) <$> ext (many (eat Just) <* eol))
