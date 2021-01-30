@@ -65,6 +65,7 @@ chkProg
   -> ([LexL], [LexL])  -- source tokens (head, body)
   -> AM (Make Anno TmR)  -- the reconstructed proof
 chkProg p gr mr ps src@(h,b) = do
+  push ExpectBlocker
   m <- case mr of
     Stub -> pure Stub
     Is a -> do
@@ -91,6 +92,7 @@ chkProg p gr mr ps src@(h,b) = do
       pure $ Ind xs
     _ -> gripe FAIL
   ns <- chkSubProofs ps
+  pop $ \case {ExpectBlocker -> True; _ -> False}
   let defined = case m of {Stub -> False; _ -> all happy ns}
   return $ Make Def (Your gr) m (Keep, defined) ns src
  where
@@ -221,7 +223,7 @@ chkSubProofs ps = do
    where
     go :: Context -> [SubMake Anno TmR] -> AM (Context, [SubMake Anno TmR])
     go B0 ps = return (B0, ps)
-    go ga@(_ :< DoorStop) ps = return (ga, ps)
+    go ga@(_ :< ExpectBlocker) ps = return (ga, ps)
     go (ga :< Expect p) ps = go ga (blep p : ps)
     go (ga :< z) ps = ((:< z) *** id) <$> go ga ps
     blep :: Proglem -> SubMake Anno TmR
@@ -295,16 +297,18 @@ validSubProof ((srg, []) ::- Make Prf sg sm () sps src) =
 validSubProof ((srg, []) ::- Make Def sg@(_, (_, _, f) :$$ as) sm () sps src) = do
   p <- gamma >>= expected f as
   True <- tracy ("FOUND " ++ show p) $ return True
+  True <- gamma >>= \ ga -> tracy (show ga) $ return True
   (True,) <$> (((srg, []) ::-) <$> chkProg p sg sm sps src)
  where
   expected f as B0 = gripe Surplus
-  expected f as (ga :< z) =
+  expected f as (ga :< z) = do
+    True <- tracy ("EXP " ++ show f ++ show as ++ show z) $ return True
     cope (do
       Expect p <- return z
       dubStep p f as
-    )
-    (\ gr -> expected f as ga <* push z)
-    (<$ setGamma ga)
+      )
+      (\ gr -> expected f as ga <* push z)
+      (<$ setGamma ga)
 validSubProof (SubPGuff ls) = return $ (False, SubPGuff ls)
 
 fromSubs

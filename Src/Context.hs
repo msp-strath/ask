@@ -41,6 +41,7 @@ data CxE -- what sort of thing is in the context?
   | (Con, [Pat]) ::> (Con, Tel)  -- constructor declaration
   | ByRule Bool{- pukka intro?-} Rule
   | Demand Subgoal
+  | ExpectBlocker
   | Expect Proglem
   | DoorStop
   | Data
