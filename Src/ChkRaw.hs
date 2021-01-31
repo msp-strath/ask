@@ -582,7 +582,8 @@ chkTest (ls, (_,_,f) :$$ as) mv = do
       if b
         then return . ("tested " ++) . rfold lout ls . (" = " ++) . rfold lout rs $ ""
         else do
-          r <- ppTm AllOK v
+          n <- norm (TE e)
+          r <- ppTm AllOK n
           return . ("tested " ++) . rfold lout ls . (" = " ++) . (r ++) .
             ("{- not " ++) . rfold lout rs $ " -}"
     Nothing -> do
