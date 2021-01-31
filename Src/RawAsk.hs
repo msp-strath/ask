@@ -261,7 +261,7 @@ pAppl' nae = penv >>= gimme where
      (kinda Uid <|> kinda Lid <|>
       kinda Num <|> kinda Str <|> kinda Chr <|>
       brk '(' (spd (iop [])))
-    <|> brk '(' (go [])
+    <|> tup <$> ext (brk '(' (sep (ext (go [])) (spd (the Sym ","))))
   iop :: [String] -> PF LexL
   iop nae = (kinda Sym >>= \ l@(_, _, s) -> guard (not $ elem s (nae ++ ["`", ","])) >> return l)
     <|> id <$ the Sym "`" <*> (kinda Uid <|> kinda Lid) <* the Sym "`"
@@ -281,3 +281,10 @@ pAppl' nae = penv >>= gimme where
       f <- ext $ start nae (k, c)
       return ((k, c), o :$$ [(ls, e), f])
     more nae (i, a) kc (ls ++ rs, e)
+  tup :: ([LexL], [Appl]) -> Appl'
+  tup (_, [(_, x)]) = x
+  tup (ls, las) = (Uid, ptup ls, stup (length las)) :$$ las where
+    stup 0 = "()"
+    stup n = "(" ++ replicate (n - 1) ',' ++ ")"
+    ptup ((_, p, _) : _) = p
+    ptup [] = (0, 0) -- but this should never happen, right?

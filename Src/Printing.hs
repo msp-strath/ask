@@ -3,6 +3,7 @@
 module Ask.Src.Printing where
 
 import Data.Char
+import Data.List
 
 import Ask.Src.Hide
 import Ask.Src.Bwd
@@ -59,6 +60,13 @@ ppTmR spot t = case readyTmR t of
 ppTm :: Spot -> Tm -> AM String
 ppTm spot (TC f@(c : s) as)
   | isAlpha c = go f
+  | c == '(' = do
+    let n = case span (',' ==) s of
+         ([], _) -> 0
+         (cs, _) -> 1 + length cs
+    if n /= length as then go f else do
+      as <- traverse (ppTm AllOK) as
+      return $ "(" ++ intercalate ", " as ++ ")"
   | otherwise = case as of
     [x, y] -> do
       (p, a) <- fixity f
