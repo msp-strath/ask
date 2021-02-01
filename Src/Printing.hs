@@ -144,7 +144,7 @@ ppGripe (BadFName f) = return $ case f of
   c : _
     | isUpper c ->
       "You declared " ++ f ++
-      " but function names should begin in lowercase. (Did you mean data "
+      " but function names should begin in lowercase. (Did you mean data ... = "
       ++ f ++ " ...?)"
   _ -> "I'm afraid that " ++ f ++ " is an unsuitable name for a function."
     
