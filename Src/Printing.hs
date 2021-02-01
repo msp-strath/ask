@@ -139,6 +139,15 @@ ppGripe (DoesNotMake c ty) = do
   return $ c ++ " cannot make a thing of type " ++ ty
 ppGripe (OverOverload c) = return $
   "Please report a bug. " ++ c ++ " has unsafe overloading."
+ppGripe (BadFName f) = return $ case f of
+  [] -> "Please report a bug. Somehow, the empty string is the name of a thing."
+  c : _
+    | isUpper c ->
+      "You declared " ++ f ++
+      " but function names should begin in lowercase. (Did you mean data "
+      ++ f ++ " ...?)"
+  _ -> "I'm afraid that " ++ f ++ " is an unsuitable name for a function."
+    
 ppGripe FAIL = return $
   "It went wrong but I've forgotten how. Please ask a human for help."
 ppGripe g = return $ show g

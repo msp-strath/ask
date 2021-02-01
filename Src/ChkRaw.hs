@@ -571,6 +571,7 @@ chkSig la@(_, (t, _, f@(c : _)) :$$ as) rty
   fn <- fresh f
   push $ Declare f fn sch
   return ()
+  | otherwise = gripe $ BadFName f
 
 chkTest :: Appl -> Maybe Appl -> AM String
 chkTest (ls, (_,_,f) :$$ as) mv = do

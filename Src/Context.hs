@@ -83,6 +83,7 @@ data Gripe
   | DoesNotMake Con Tm
   | OverOverload Con
   | NonCanonicalType Tm Con
+  | BadFName String
   | FAIL
   deriving Show
 
