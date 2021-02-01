@@ -4,13 +4,16 @@ module Ask.Src.ChkRaw where
 
 import Data.List
 import Data.Char
-import qualified Data.Map as M
 import Control.Arrow ((***))
 import Data.Bifoldable
 import Control.Applicative
+import Data.Traversable
+import Control.Monad
+import Data.Foldable
 
 import Debug.Trace
 
+import Ask.Src.Hide
 import Ask.Src.Thin
 import Ask.Src.Bwd
 import Ask.Src.OddEven
@@ -18,11 +21,14 @@ import Ask.Src.Lexing
 import Ask.Src.RawAsk
 import Ask.Src.Tm
 import Ask.Src.Glueing
+import Ask.Src.Context
 import Ask.Src.Typing
+import Ask.Src.Proving
 import Ask.Src.Printing
 import Ask.Src.HardwiredRules
+import Ask.Src.Progging
 
-track = const id
+tracy = const id
 
 type Anno =
   ( Status
@@ -35,179 +41,304 @@ data Status
   | Need
   deriving Show
 
-passive :: Prove () Appl -> Prove Anno TmR
-passive (Prove g m () ps src) =
-  Prove (Your g) (fmap Your m) (Keep, False) (fmap subPassive ps) src
+passive :: Make () Appl -> Make Anno TmR
+passive (Make k g m () ps src) =
+  Make k (Your g) (fmap Your m) (Keep, False) (fmap subPassive ps) src
   
-subPassive :: SubProve () Appl -> SubProve Anno TmR
+subPassive :: SubMake () Appl -> SubMake Anno TmR
 subPassive ((srg, gs) ::- p) = (srg, map (fmap Your) gs) ::- passive p
 subPassive (SubPGuff ls) = SubPGuff ls
 
-surplus :: Prove () Appl -> Prove Anno TmR
-surplus (Prove g m () ps src) =
-  Prove (Your g) (fmap Your m) (Junk Surplus, True) (fmap subPassive ps) src
+surplus :: Make () Appl -> Make Anno TmR
+surplus (Make k g m () ps src) =
+  Make k (Your g) (fmap Your m) (Junk Surplus, True) (fmap subPassive ps) src
   
-subSurplus :: SubProve () Appl -> SubProve Anno TmR
+subSurplus :: SubMake () Appl -> SubMake Anno TmR
 subSurplus ((srg, gs) ::- p) = (srg, map (fmap Your) gs) ::- surplus p
 subSurplus (SubPGuff ls) = SubPGuff ls
+
+chkProg
+  :: Proglem
+  -> Appl
+  -> Method Appl -- the method
+  -> Bloc (SubMake () Appl)  -- the subproofs
+  -> ([LexL], [LexL])  -- source tokens (head, body)
+  -> AM (Make Anno TmR)  -- the reconstructed proof
+chkProg p gr mr ps src@(h,b) = do
+  push ExpectBlocker
+  m <- case mr of
+    Stub -> pure Stub
+    Is a -> do
+      doorStop
+      True <- tracy ("IS " ++ show a ++ " ?") $ return True
+      push $ RecShadow (uName p)
+      traverse push (localCx p)
+      a@(Our t _) <- elabTmR (rightTy p) a
+      True <- tracy ("IS SO " ++ show t) $ return True
+      (PC _ ps, sb) <- patify $ TC "" (map fst (leftImpl p ++ leftSatu p ++ leftAppl p))
+      doorStep
+      pushOutDoor $ (fNom p, ps) :=: rfold e4p sb (t ::: rightTy p)
+      pure (Is a)
+    From a@(_, ((_, _, x) :$$ as)) -> do
+      doorStop
+      traverse push (localCx p)
+      (e, _) <- elabSyn x as
+      doorStep
+      TE (TP (xn, Hide ty)) <- return (upTE e)
+      tels <- conSplit ty
+      traverse (expect xn ty p) tels
+      pure (From (Our (TE e) a))
+    Ind xs -> do
+      p <- inductively p xs
+      push (Expect p)
+      pure $ Ind xs
+    _ -> gripe FAIL
+  ns <- chkSubProofs ps
+  pop $ \case {ExpectBlocker -> True; _ -> False}
+  let defined = case m of {Stub -> False; _ -> all happy ns}
+  return $ Make Def (Your gr) m (Keep, defined) ns src
+ where
+  expect :: Nom -> Tm -> Proglem -> (Con, Tel) -> AM ()
+  expect xn ty p (c, tel) = do
+    (de, sb) <- wrangle (localCx p)
+    push . Expect $ sbpg sb (p {localCx = de})
+   where
+    wrangle B0 = gripe FAIL
+    wrangle (ga :< (Bind (yn, _) (User y))) | yn == xn = do
+      (ga, xs) <- bungle ga [] B0 y tel
+      return (ga, [(xn, TC c xs ::: ty)])
+    wrangle (ga :< z) = do
+      (ga, sb) <- wrangle ga
+      case z of
+        Hyp h -> return (ga :< Hyp (rfold e4p sb h), sb)
+        Bind (yn, Hide ty) k -> do
+          let yp = (yn, Hide (rfold e4p sb ty))
+          return (ga :< Bind yp k, (yn, TP yp) : sb)
+        z -> return (ga :< z, sb) 
+    bungle ga sch xz y (Pr hs) = do
+      zs <- for sch $ \ ((x, s), _) -> do
+        xn <- fresh (y ++ x)
+        return (x, xn, s)
+      let m = [ (z, TE (TP (zn, Hide (stan m s))))
+              | (z, zn, s) <- zs
+              ]
+      return (foldl glom ga m <>< map Hyp (stan m hs), stan m (xz <>> []))
+     where
+      glom ga (z, TE (TP xp)) = ga :< Bind xp (User z)
+      glom ga _ = ga
+    bungle ga sch xz y (Ex a b) = do
+      xn <- fresh ""
+      let xp = (xn, Hide a)
+      (ga, xs) <- bungle (ga :< Bind xp (User "")) sch xz y (b // TP xp)
+      return (ga, TE (TP xp) : xs)
+    bungle ga sch xz y ((x, s) :*: tel) =
+      bungle ga (topInsert ((x, s), ()) sch) (xz :< TM x []) y tel
+    sbpg :: [(Nom, Syn)] -> Proglem -> Proglem
+    sbpg sb (Proglem de f u li ls la ty) =
+      Proglem de f u
+        (rfold e4p sb li)
+        (rfold e4p sb ls)
+        (rfold e4p sb la)
+        (rfold e4p sb ty)
 
 -- this type is highly provisional
 chkProof
   :: TmR         -- the goal
   -> Method Appl -- the method
-  -> Bloc (SubProve () Appl)  -- the subproofs
+  -> Bloc (SubMake () Appl)  -- the subproofs
   -> ([LexL], [LexL])  -- source tokens (head, body)
-  -> AM (Prove Anno TmR)  -- the reconstructed proof
+  -> AM (Make Anno TmR)  -- the reconstructed proof
 
 chkProof g m ps src = cope go junk return where
-  junk gr = return $ Prove g (fmap Your m) (Junk gr, True)
+  junk gr = return $ Make Prf g (fmap Your m) (Junk gr, True)
     (fmap subPassive ps) src
   go = case my g of
     Just gt -> do
-      (m, ss) <- case m of
-        Stub -> return $ (Stub, [])
-        By r -> (By *** id) <$> (gt `by` r)
+      m <- case m of
+        Stub -> pure Stub
+        By r -> By <$> (gt `by` r)
         From h@(_, (t, _, _) :$$ _) | elem t [Uid, Sym] -> do
-          h@(Our ht _) <- scoApplTm Prop h
-          (From h,) <$> ((TC "prove" [ht] :) <$> fromSubs gt ht)
+          ht <- elabTm Prop h
+          demand (PROVE ht)
+          fromSubs gt ht
+          return (From (Our ht h))
         From h -> gripe $ FromNeedsConnective h
-        MGiven -> do
-          given gt
-          return (MGiven, [])
-      ns <- chkSubProofs ss ps
+        MGiven -> MGiven <$ given gt
+      ns <- chkSubProofs ps
       let proven = case m of {Stub -> False; _ -> all happy ns}
-      return $ Prove g m (Keep, proven) ns src
-    Nothing -> return $ Prove g (fmap Your m) (Junk Mardiness, True)
+      return $ Make Prf g m (Keep, proven) ns src
+    Nothing -> return $ Make Prf g (fmap Your m) (Junk Mardiness, True)
       (fmap subPassive ps) src
 
-happy :: SubProve Anno TmR -> Bool
-happy (_ ::- Prove _ _ (_, b) _ _) = b
+happy :: SubMake Anno TmR -> Bool
+happy (_ ::- Make _ _ _ (_, b) _ _) = b
 happy _ = True
- 
+
 -- checking subproofs amounts to validating them,
 -- then checking which subgoals are covered,
 -- generating stubs for those which are not,
 -- and marking as surplus those subproofs which do
 -- not form part of the cover
 chkSubProofs
-  :: [Tm]                            -- subgoals expected from rule
-  -> Bloc (SubProve () Appl)         -- subproofs coming from user
-  -> AM (Bloc (SubProve Anno TmR))   -- reconstruction
-chkSubProofs ss ps = do
-  ps <- traverse validSubProof ps
-  (qs, us) <- cover ss (fmap (False,) ps)
+  :: Bloc (SubMake () Appl)         -- subproofs coming from user
+  -> AM (Bloc (SubMake Anno TmR))   -- reconstruction
+chkSubProofs ps = do
+  ss <- demands
+  (qs, us) <- traverse validSubProof ps >>= cover ss
+  eps <- gamma >>= sprog
   vs <- extra us
-  return $ glom (fmap squish qs) vs
+  return $ glom (fmap squish qs) (eps ++ vs)
  where
   cover
-    :: [Tm]  -- subgoals to cover
-    -> Bloc (Bool, SubProve Anno TmR)  -- (used yet?, subproof)
-    -> AM (Bloc (Bool, SubProve Anno TmR)  -- ditto
-          , [Tm]                          -- undischarged subgoals
+    :: [Subgoal]  -- subgoals to cover
+    -> Bloc (Bool, SubMake Anno TmR)  -- (used yet?, subproof)
+    -> AM (Bloc (Bool, SubMake Anno TmR)  -- ditto
+          , [Subgoal]                      -- undischarged subgoals
           )
   cover [] qs = return (qs, [])
   cover (t : ts) qs = cope (cover1 t qs)
     (\ _ -> cover ts qs >>= \ (qs, ts) -> return (qs, t : ts))
     $ cover ts
-  cover1 :: Tm -> Bloc (Bool, SubProve Anno TmR)
-         -> AM (Bloc (Bool, SubProve Anno TmR))
+  cover1 :: Subgoal -> Bloc (Bool, SubMake Anno TmR)
+         -> AM (Bloc (Bool, SubMake Anno TmR))
   cover1 t (_ :-/ Stop) = gripe FAIL
   cover1 t (g :-/ (b, p) :-\ qs) = cope (covers t p)
     (\ _ -> ((g :-/) . ((b, p) :-\ )) <$> cover1 t qs)
     $ \ _ -> return $ (g :-/ (True, p) :-\ qs)
-  covers :: Tm -> SubProve Anno TmR -> AM ()
-  covers t ((_, hs) ::- Prove g m (Keep, _) _ _) = subgoal t $ \ t -> do
+  covers :: Subgoal -> SubMake Anno TmR -> AM ()
+  covers t ((_, hs) ::- Make Prf g m (Keep, _) _ _) = subgoal t $ \ t -> do
     g <- mayhem $ my g
     traverse ensure hs
     equal Prop (g, t)
    where
     ensure (Given h) = mayhem (my h) >>= given
   covers t _ = gripe FAIL
-  squish :: (Bool, SubProve Anno TmR) -> SubProve Anno TmR
-  squish (False, gs ::- Prove g m (Keep, _) ss src) =
-    gs ::- Prove g m (Junk Surplus, True) ss src
+  squish :: (Bool, SubMake Anno TmR) -> SubMake Anno TmR
+  squish (False, gs ::- Make k g m (Keep, _) ss src) =
+    gs ::- Make k g m (Junk Surplus, True) ss src
   squish (_, q) = q
-  extra :: [Tm] -> AM [SubProve Anno TmR]
+  sprog :: Context -> AM [SubMake Anno TmR]
+  sprog ga = do
+    (ga, ps) <- go ga []
+    setGamma ga
+    return ps
+   where
+    go :: Context -> [SubMake Anno TmR] -> AM (Context, [SubMake Anno TmR])
+    go B0 ps = return (B0, ps)
+    go ga@(_ :< ExpectBlocker) ps = return (ga, ps)
+    go (ga :< Expect p) ps = go ga (blep p : ps)
+    go (ga :< z) ps = ((:< z) *** id) <$> go ga ps
+    blep :: Proglem -> SubMake Anno TmR
+    blep p = ([], []) ::- -- bad hack on its way!
+      Make Def (My (TC (uName p) (fst (frob [] (map fst (leftSatu p ++ leftAppl p))))))
+        Stub (Need, False) ([] :-/ Stop) ([], [])
+      where
+        frob zs [] = ([], zs)
+        frob zs (TC c ts : us) = case frob zs ts of
+          (ts, zs) -> case frob zs us of
+            (us, zs) -> (TC c ts : us, zs)
+        frob zs (TE (TP (x, _)) : us) = let
+            y = case foldMap (dubd x) (localCx p) of
+                  [y] -> y
+                  _   -> fst (last x)
+            z = grob (krob y) Nothing zs
+          in case frob (z : zs) us of
+            (us, zs) -> (TC z [] : us, zs)
+        krob [] = "x"
+        krob (c : cs)
+          | isLower c = c : filter isIdTaily cs
+          | isUpper c = toLower c : filter isIdTaily cs
+          | otherwise = krob cs
+        grob x i zs = if elem y zs then grob x j zs else y where
+          (y, j) = case i of
+            Nothing -> (x, Just 0)
+            Just n -> (x ++ show n, Just (n + 1))
+        dubd xn (Bind (yn, _) (User y)) | xn == yn = [y]
+        dubd xn _ = []
+
+  extra :: [Subgoal] -> AM [SubMake Anno TmR]
   extra [] = return []
   extra (u : us) = cope (subgoal u obvious)
     (\ _ -> (need u :) <$> extra us)
     $ \ _ -> extra us
   obvious s
     =   given s
-    <|> given (TC "False" [])
-    <|> equal Prop (s, TC "True" [])
-  need (TC "prove" [g]) =
-    ([], []) ::- Prove (My g) Stub (Need, False)
+    <|> given FALSE
+    <|> equal Prop (s, TRUE)
+            
+  need (PROVE g) =
+    ([], []) ::- Make Prf (My g) Stub (Need, False)
       ([] :-/ Stop) ([], [])
-  need (TC "given" [h, u]) = case need u of
+  need (GIVEN h u) = case need u of
     (_, gs) ::- p -> ([], Given (My h) : gs) ::- p
     s -> s
   glom :: Bloc x -> [x] -> Bloc x
   glom (g :-/ p :-\ gps) = (g :-/) . (p :-\) . glom gps
   glom end = foldr (\ x xs -> [] :-/ x :-\ xs) end
 
-subgoal :: Tm -> (Tm -> AM x) -> AM x
-subgoal (TC "given" [h, g]) k = h |- subgoal g k
-subgoal (TC "prove" [g]) k = k g
-subgoal _ _ = gripe BadSubgoal
+subgoal :: Subgoal -> (Tm -> AM x) -> AM x
+subgoal (GIVEN h g) k = h |- subgoal g k
+subgoal (PROVE g) k = k g
 
 validSubProof
-  :: SubProve () Appl
-  -> AM (SubProve Anno TmR)
-validSubProof ((srg, Given h : gs) ::- p@(Prove sg sm () sps src)) =
-  cope (scoApplTm Prop h)
-    (\ gr -> return $ (srg, map (fmap Your) (Given h : gs)) ::-
-      Prove (Your sg) (fmap Your sm) (Junk gr, True)
-        (fmap subPassive sps) src)
-    $ \ h@(Our ht _) -> do
-      (srg, gs) ::- p <- ht |- validSubProof ((srg, gs) ::- p)
-      return $ (srg, Given h : gs) ::- p
-validSubProof ((srg, []) ::- Prove sg sm () sps src) =
-  cope (scoApplTm Prop sg)
-    (\ gr -> return $ (srg, []) ::- Prove  (Your sg) (fmap Your sm) (Junk gr, True)
-      (fmap subPassive sps) src)
-    $ \ sg -> ((srg, []) ::-) <$> chkProof sg sm sps src
-validSubProof (SubPGuff ls) = return $ SubPGuff ls
-
+  :: SubMake () Appl
+  -> AM (Bool, SubMake Anno TmR)
+validSubProof ((srg, Given h : gs) ::- p@(Make k sg sm () sps src)) =
+  cope (elabTm Prop h)
+    (\ gr -> return $ (False, (srg, map (fmap Your) (Given h : gs)) ::-
+      Make k (Your sg) (fmap Your sm) (Junk gr, True)
+        (fmap subPassive sps) src))
+    $ \ ht -> do
+      (b, (srg, gs) ::- p) <- ht |- validSubProof ((srg, gs) ::- p)
+      return $ (b, (srg, Given (Our ht h) : gs) ::- p)
+validSubProof ((srg, []) ::- Make Prf sg sm () sps src) =
+  cope (elabTmR Prop sg)
+    (\ gr -> return $ (False, (srg, []) ::- Make Prf (Your sg) (fmap Your sm)
+      (Junk gr, True) (fmap subPassive sps) src))
+    $ \ sg -> (False, ) <$> (((srg, []) ::-) <$> chkProof sg sm sps src)
+validSubProof ((srg, []) ::- Make Def sg@(_, (_, _, f) :$$ as) sm () sps src) = do
+  p <- gamma >>= expected f as
+  True <- tracy ("FOUND " ++ show p) $ return True
+  True <- gamma >>= \ ga -> tracy (show ga) $ return True
+  (True,) <$> (((srg, []) ::-) <$> chkProg p sg sm sps src)
+ where
+  expected f as B0 = gripe Surplus
+  expected f as (ga :< z) = do
+    True <- tracy ("EXP " ++ show f ++ show as ++ show z) $ return True
+    cope (do
+      Expect p <- return z
+      dubStep p f as
+      )
+      (\ gr -> expected f as ga <* push z)
+      (<$ setGamma ga)
+validSubProof (SubPGuff ls) = return $ (False, SubPGuff ls)
 
 fromSubs
   :: Tm      -- goal
   -> Tm      -- fmla
-  -> AM [Tm]
+  -> AM ()
 fromSubs g f = map snd {- ignorant -} <$> invert f >>= \case
-  [[s]] -> return $ flop s g
-  rs -> return $ map (foldr wrangle (TC "prove" [g])) rs
+  [[s]] -> flop s g
+  rs -> mapM_ (demand . foldr (GIVEN . propify) (PROVE g)) rs
  where
-  flop (TC "prove" [p]) g = [TC "given" [p, TC "prove" [g]]]
-  flop (TC "given" [h, s]) g = TC "prove" [h] : flop s g
-  flop _ _ = [TC "prove" [g]] -- should not happen
-  wrangle p g = TC "given" [wangle p, g]
-  wangle (TC "given" [s, t]) = TC "->" [s, wangle t]
-  wangle (TC "prove" [p]) = p
-  wangle _ = TC "True" []
+  flop (PROVE p)   g = demand . GIVEN p $ PROVE g
+  flop (GIVEN h s) g = do
+    demand $ PROVE h
+    flop s g
+  propify (GIVEN s t) = s :-> propify t
+  propify (PROVE p)   = p
 
-{-
-testChkProof :: String -> [Prove Anno TmR]
-testChkProof = foldMap (bof . fst) . raw (fixities mySetup) where
-  bof (RawProof (Prove gr mr () ps src)) = case runAM (chkProof g mr ps src) mySetup ga of
-    Right p -> [p]
-    Left _  -> []
-   where
-    (ga, g) = applScoTm gr
-  bof _ = []
--}
-
-pout :: LayKind -> Prove Anno TmR -> AM (Odd String [LexL])
-pout k p@(Prove g m (s, n) ps (h, b)) = let k' = scavenge b in case s of
+pout :: LayKind -> Make Anno TmR -> AM (Odd String [LexL])
+pout k p@(Make mk g m (s, n) ps (h, b)) = let k' = scavenge b in case s of
   Keep -> do
     blk <- psout k' ps
-    return $ (rfold lout (h `prove` n) . whereFormat b ps
+    return $ (rfold lout (h `tense` n) . whereFormat b ps
              $ format k' blk)
              :-/ Stop
   Need -> do
     g <- ppTmR AllOK g
     blk <- psout k' ps
-    return $ (("prove " ++) . (g ++) . (" ?" ++) . whereFormat b ps
+    return $ ((show mk ++) . (" " ++) . (g ++) . (" ?" ++) . whereFormat b ps
              $ format k' blk)
              :-/ Stop
   Junk e -> do
@@ -217,22 +348,23 @@ pout k p@(Prove g m (s, n) ps (h, b)) = let k' = scavenge b in case s of
       (rfold lout h . rfold lout b $ "") :-/ [(Ret, (0,0), "\n")] :-\
       "-}" :-/ Stop
  where
-   ((Key, p, s) : ls) `prove` n | elem s ["prove", "proven"] =
-     (Key, p, "prove" ++ if n then "n" else "") : ls
+   kws = [done mk b | b <- [False, True]]
+   ((Key, p, s) : ls) `tense` n | elem s kws =
+     (Key, p, done mk n) : ls
    (l : ls) `prove` n = l : (ls `prove` n)
    [] `prove` n = [] -- should never happen
    
-   psout :: LayKind -> Bloc (SubProve Anno TmR) -> AM (Bloc String)
+   psout :: LayKind -> Bloc (SubMake Anno TmR) -> AM (Bloc String)
    psout k (g :-/ Stop) = return $ g :-/ Stop
    psout k (g :-/ SubPGuff [] :-\ h :-/ r) = psout k ((g ++ h) :-/ r)
    psout k (g :-/ p :-\ gpo) =
      (g :-/) <$> (ocato <$> subpout k p <*> psout k gpo)
 
-   subpout :: LayKind -> SubProve Anno TmR -> AM (Odd String [LexL])
+   subpout :: LayKind -> SubMake Anno TmR -> AM (Odd String [LexL])
    subpout _ (SubPGuff ls)
      | all gappy ls = return $ rfold lout ls "" :-/ Stop
      | otherwise = return $ ("{- " ++ rfold lout ls " -}") :-/ Stop
-   subpout _ ((srg, gs) ::- Prove _ _ (Junk e, _) _ (h, b)) = do
+   subpout _ ((srg, gs) ::- Make m _ _ (Junk e, _) _ (h, b)) = do
      e <- ppGripe e
      return $
        ("{- " ++ e) :-/ [] :-\
@@ -321,22 +453,221 @@ pout k p@(Prove g m (s, n) ps (h, b)) = let k' = scavenge b in case s of
      clos ls = (Sym, (0,0), "}") :ls
      sepa ls = (Sym, (0,0), ";") : ls ++ [(Spc, (0,0), " ")]
 
-filth :: String -> String
-filth s = bifoldMap (($ "") . rfold lout) yuk (raw (fixities mySetup) s) where
-  yuk (RawProof (Prove gr mr () ps src), ls) = case runAM go mySetup init of
-    Left e -> case runAM (ppGripe e) mySetup init of
-      Left _ -> "{- " ++ show e ++ "\n" ++ rfold lout ls "\n-}"
-      Right (e, _) ->
-         "{- " ++ e ++ "\n" ++ rfold lout ls "\n-}"
-    Right (s, _) -> s
-   where
-    go :: AM String
-    go = do
-      g <- applScoTm (TC "Prop" []) gr
+
+noDuplicate :: Tm -> Con -> AM ()
+noDuplicate ty con = cope (constructor ty con)
+  (\ _ -> return ())
+  (\ _ -> gripe $ Duplication Prop con)
+
+chkProp :: Appl -> Bloc RawIntro -> AM ()
+chkProp (ls, (t, _, rel) :$$ as) intros | elem t [Uid, Sym]  = do
+  noDuplicate Prop rel
+  doorStop
+  tel <- elabTel as
+  pushOutDoor $ ("Prop", []) ::> (rel, tel)
+  (rus, cxs) <- fold <$> traverse (chkIntro tel) intros
+  guard $ nodup rus
+  mapM_ pushOutDoor cxs
+  doorStep
+  return ()
+ where
+  chkIntro :: Tel -> RawIntro -> AM ([String], [CxE])
+  chkIntro tel (RawIntro aps rp prems) = do
+    doorStop
+    push ImplicitQuantifier
+    (ht, _) <- elabVec rel tel aps
+    (hp, sb0) <- patify ht
+    (ru, as) <- case rp of
+      (_, (t, _, ru) :$$ as) | elem t [Uid, Sym] -> return (ru, as)
+      _ -> gripe FAIL
+    return ()
+    (vs, sb1) <- bindParam as
+    let sb = sb0 ++ sb1
+    guard $ nodup (map fst sb)
+    pop $ \case {ImplicitQuantifier -> True; _ -> False}
+    ps <- traverse chkPrem prems
+    lox <- doorStep
+    tel <- telify vs lox
+    let (tel', ps') = rfold e4p sb (tel, toList ps)
+    let byr = ByRule True $ (hp, (ru, tel')) :<= ps'
+    return ([ru], [byr])
+  chkPrem :: ([Appl], Appl) -> AM Subgoal
+  chkPrem (hs, g) =
+    rfold GIVEN <$> traverse (elabTm Prop) hs <*> (PROVE <$> elabTm Prop g)
+chkProp _ intros = gripe FAIL
+
+patify :: Tm -> AM (Pat, [(Nom, Syn)])
+patify (TC c ts) = do
+  (ts, sb) <- go ts
+  return (PC c ts, sb)
+ where
+  go [] = return ([], [])
+  go (t : ts) = do
+    (t,  sb0) <- patify t
+    (ts, sb1) <- go ts
+    if null (intersect (map fst sb0) (map fst sb1))
+      then return (t : ts, sb0 ++ sb1)
+      else gripe FAIL
+patify (TE (TP (xp, Hide ty))) = do
+  User x <- nomBKind xp
+  return (PM x mempty, [(xp, TM x [] ::: ty)])
+patify _ = gripe FAIL
+
+chkData :: Appl -> [Appl] -> AM ()
+chkData (_, (t, _, tcon) :$$ as) vcons | elem t [Uid, Sym] = do
+  noDuplicate Type tcon
+  doorStop
+  doorStop
+  (vs, _) <- bindParam as
+  fake <- gamma >>= (`fakeTel` Pr [])
+  push $ ("Type", []) ::> (tcon, fake)
+  cts <- traverse chkCon vcons
+  guard $ nodup (map fst cts)
+  lox <- doorStep
+  real <- telify vs lox
+  push $ ("Type", []) ::> (tcon , real)
+  (ps, sb) <- mkPatsSubs 0 lox
+  for cts $ \ (c, tel) ->
+    push $ (tcon, ps) ::> (c, rfold e4p sb tel)
+  ctors <- doorStep
+  push $ Data tcon (B0 <>< ctors)
+  return ()
+ where
+  fakeTel :: Context -> Tel -> AM Tel
+  fakeTel B0 tel = return tel -- not gonna happen because...
+  fakeTel (ga :< DoorStop) tel = return tel -- ...this prevents it
+  fakeTel (ga :< Bind (_, Hide ty) (User x)) tel =
+    fakeTel ga ((x, ty) :*: tel)
+  fakeTel (ga :< _) tel = fakeTel ga tel
+  chkCon :: Appl -> AM (String, Tel)
+  chkCon (_, (t, _, vcon) :$$ as) | elem t [Uid, Sym] = do
+    vtel <- elabTel as
+    return (vcon, vtel)
+  chkCon _ = gripe FAIL
+  mkPatsSubs :: Int -> [CxE] -> AM ([Pat], [(Nom, Syn)])
+  mkPatsSubs _ [] = return ([], [])
+  mkPatsSubs i (Bind (xp, Hide ty) bk : lox) = case bk of
+    Hole -> let x = '%' : show i in
+      ((PM x mempty :) *** ((xp, TM x [] ::: ty) :)) <$> mkPatsSubs (i + 1) lox
+    Defn t ->
+      (id *** ((xp, t ::: ty) :)) <$> mkPatsSubs i lox
+    User x ->
+       ((PM x mempty :) *** ((xp, TM x [] ::: ty) :)) <$> mkPatsSubs (i + 1) lox
+  mkPatsSubs i (_ : lox) = mkPatsSubs i lox
+chkData _ _ = gripe FAIL
+
+chkSig :: Appl -> Appl -> AM ()
+chkSig la@(_, (t, _, f@(c : _)) :$$ as) rty
+  | t == Lid || (t == Sym && c /= ':')
+  = do
+  -- cope (what's f) (\ gr -> return ()) (\ _ -> gripe $ AlreadyDeclared f)
+  doorStop
+  push ImplicitQuantifier
+  xts <- placeHolders as
+  rty <- elabTm Type rty
+  pop $ \case {ImplicitQuantifier -> True; _ -> False}
+  lox <- doorStep
+  sch <- schemify (map fst xts) lox rty
+  fn <- fresh f
+  push $ Declare f fn sch
+  return ()
+
+chkTest :: Appl -> Maybe Appl -> AM String
+chkTest (ls, (_,_,f) :$$ as) mv = do
+  (e, sy) <- elabSyn f as
+  case mv of
+    Just t@(rs, _) -> do
+      v <- elabTm sy t
+      b <- cope (equal sy (TE e, v)) (\ _ -> return False) (\ _ -> return True)
+      if b
+        then return . ("tested " ++) . rfold lout ls . (" = " ++) . rfold lout rs $ ""
+        else do
+          n <- norm (TE e)
+          r <- ppTm AllOK n
+          return . ("tested " ++) . rfold lout ls . (" = " ++) . (r ++) .
+            ("{- not " ++) . rfold lout rs $ " -}"
+    Nothing -> do
+      v <- norm (TE e)
+      r <- ppTm AllOK v
+      return . ("tested " ++) . rfold lout ls . (" = " ++) $ r
+
+askRawDecl :: (RawDecl, [LexL]) -> AM String
+askRawDecl (RawProof (Make Prf gr mr () ps src), ls) = id
+  <$ doorStop
+  <*> cope (do
+      g <- impQElabTm Prop gr
       bifoldMap id (($ "") . rfold lout) <$> 
-           (chkProof g mr ps src >>= pout (Denty 1))
-  yuk (RawSewage, ls) = "{- don't ask\n" ++ rfold lout ls "\n-}"
-  yuk (_, ls) = rfold lout ls ""
+        (chkProof g mr ps src >>= pout (Denty 1)))
+    (\ gr -> do
+      e <- ppGripe gr
+      return $ "{- " ++ e ++ "\n" ++ rfold lout ls "\n-}")
+    return
+  <* doorStep
+askRawDecl (RawProof (Make Def gr@(_, (_, _, f) :$$ as) mr () ps src), ls) = id
+  <$ doorStop
+  <*> cope (do
+      Left (fn, sch) <- what's f
+      p <- proglify fn (f, sch)
+      p <- dubStep p f as
+      True <- tracy (show p) $ return True
+      bifoldMap id (($ "") . rfold lout) <$> 
+        (chkProg p gr mr ps src >>= pout (Denty 1))
+      )
+     (\ gr -> do
+       e <- ppGripe gr
+       return $ "{- " ++ e ++ "\n" ++ rfold lout ls "\n-}")
+    return
+  -- <* doorStep
+askRawDecl (RawProp tmpl intros, ls) = cope (chkProp tmpl intros)
+  (\ gr -> do
+    e <- ppGripe gr
+    return $ "{- " ++ e ++ "\n" ++ rfold lout ls "\n-}")
+  (\ _ -> return $ rfold lout ls "")
+askRawDecl (RawData tcon vcons, ls) = cope (chkData tcon vcons)
+  (\ gr -> do
+    e <- ppGripe gr
+    return $ "{- " ++ e ++ "\n" ++ rfold lout ls "\n-}")
+  (\ _ -> return $ rfold lout ls "")
+askRawDecl (RawSig la ra, ls) =
+  cope (chkSig la ra)
+  (\ gr -> do
+    e <- ppGripe gr
+    return $ "{- " ++ e ++ "\n" ++ rfold lout ls "\n-}")
+  (\ _ -> return $ rfold lout ls "")
+askRawDecl (RawTest e mv, ls) =
+  cope (chkTest e mv)
+  (\ gr -> do
+    e <- ppGripe gr
+    return $ "{- " ++ e ++ "\n" ++ rfold lout ls "\n-}")
+  return
+askRawDecl (RawSewage, []) = return ""
+askRawDecl (RawSewage, ls) = return $ "{- don't ask\n" ++ rfold lout ls "\n-}"
+askRawDecl (_, ls) = return $ rfold lout ls ""
+
+filth :: String -> String
+filth s = case runAM go mySetup init of
+  Left e -> "OH NO! " ++ show e
+  Right (s, _) -> s
+ where
+  go :: AM String
+  go = do
+    ftab <- fixities <$> setup
+    bifoldMap (($ "") . rfold lout) id <$> traverse askRawDecl (raw ftab s)
+  init :: AskState
+  init = AskState
+    { context = myContext
+    , root    = (B0, 0)
+    }
+
+ordure :: String -> String
+ordure s = case runAM go mySetup init of
+  Left e -> "OH NO! " ++ show e
+  Right (s, as) -> s ++ "\n-------------------------\n" ++ show as
+ where
+  go :: AM String
+  go = do
+    ftab <- fixities <$> setup
+    bifoldMap (($ "") . rfold lout) id <$> traverse askRawDecl (raw ftab s)
   init :: AskState
   init = AskState
     { context = myContext

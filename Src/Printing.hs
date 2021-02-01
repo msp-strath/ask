@@ -3,13 +3,15 @@
 module Ask.Src.Printing where
 
 import Data.Char
+import Data.List
 
+import Ask.Src.Hide
 import Ask.Src.Bwd
 import Ask.Src.Lexing
 import Ask.Src.RawAsk
 import Ask.Src.Tm
 import Ask.Src.Glueing
-import Ask.Src.Typing
+import Ask.Src.Context
 
 data Spot = AllOK | RadSpot | Infix (Int, Either Assocy Assocy) | Fun | Arg deriving (Show, Eq)
 data Wot = Rad | Inf (Int, Assocy) | App deriving (Show, Eq)
@@ -25,11 +27,7 @@ instance Ord Wot where
   -- x <= y means you can put a y anywhere you can put an x with no parens
 
 pinx :: Int -> AM String
-pinx i = go i <$> gamma where
-  go i B0 = "???" ++ show i
-  go 0 (ga :< Var x) = x
-  go i (ga :< Var _) = go (i - 1) ga
-  go i (ga :< _)     = go i       ga
+pinx i = return $ "???"
 
 pnom :: Nom -> AM String
 pnom x = cope (nomBKind x) (\ gr -> return (show x)) $ \case
@@ -62,6 +60,13 @@ ppTmR spot t = case readyTmR t of
 ppTm :: Spot -> Tm -> AM String
 ppTm spot (TC f@(c : s) as)
   | isAlpha c = go f
+  | c == '(' = do
+    let n = case span (',' ==) s of
+         ([], _) -> 0
+         (cs, _) -> 1 + length cs
+    if n /= length as then go f else do
+      as <- traverse (ppTm AllOK) as
+      return $ "(" ++ intercalate ", " as ++ ")"
   | otherwise = case as of
     [x, y] -> do
       (p, a) <- fixity f
@@ -89,9 +94,20 @@ ppEl spot (f :$ s) = do
   f <- ppEl Fun f
   s <-  ppTm Arg s
   return . pppa spot App $ f ++ " " ++ s
+ppEl spot (TF (f, Hide sch) ss ts) = do
+  ss <- return $ dump sch ss
+  ppTm spot (TC (fst (last f)) (ss ++ ts))
+  -- terrible hack
+ where
+  dump (Al a t) (s : ss) = dump (t // (s ::: a)) ss
+  dump _ ss = ss
+
 
 ppGripe :: Gripe -> AM String
 ppGripe Surplus = return "I don't see why you need this"
+ppGripe (Duplication ty c) = do
+  ty <- ppTm AllOK ty
+  return $ "I already have something called " ++ c ++ " that makes things in " ++ ty
 ppGripe (Scope x) = return $ "I can't find " ++ x ++ " in scope"
 ppGripe (ByBadRule r t) = do
   t <- ppTm AllOK t
@@ -107,7 +123,6 @@ ppGripe (NotGiven p) = do
 ppGripe (NotARule (ls, _)) = return $ rfold lout ls " is not the right shape to be a rule."
 ppGripe Mardiness = return $
   "I seem to be unhappy but I can't articulate why, except that it's Conor's fault."
-ppGripe BadSubgoal = return "Please report a bug: I have found a badly structured subgoal."
 ppGripe (WrongNumOfArgs c n as) = return $
   c ++ " expects " ++ count n ++ " but you have given it " ++ blat as
   where

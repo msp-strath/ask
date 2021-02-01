@@ -13,78 +13,82 @@ import Data.List
 import Ask.Src.OddEven
 import Ask.Src.Lexing
 
-newtype ParTok x = ParTok {parTok
-  :: [LexL]
+newtype ParTok e x = ParTok {parTok
+  :: e       -- some sort of read-only environment, never mind what
+  -> [LexL]
   -> [([LexL], x, [LexL])]
   } deriving (Semigroup, Monoid)
 
-instance Monad ParTok where
-  return x = ParTok $ \ ls -> [([], x, ls)]
-  ParTok ps >>= k = ParTok $ \ ls -> do
-    (ks, s, ls) <- ps ls
-    (kt, t, ls) <- parTok (k s) ls
+instance Monad (ParTok e) where
+  return x = ParTok $ \ _ ls -> [([], x, ls)]
+  ParTok ps >>= k = ParTok $ \ e ls -> do
+    (ks, s, ls) <- ps e ls
+    (kt, t, ls) <- parTok (k s) e ls
     return (ks ++ kt, t, ls)
 
-instance Applicative ParTok where
+instance Applicative (ParTok e) where
   pure = return
   (<*>) = ap
 
-instance Functor ParTok where
+instance Functor (ParTok e) where
   fmap = ap . return
 
-instance Alternative ParTok where
+instance Alternative (ParTok e) where
   empty = mempty
   (<|>) = (<>)
 
-(?>) :: ParTok x -> ParTok x -> ParTok x
-(?>) (ParTok f) (ParTok g) = ParTok $ \ ls -> case f ls of
-  [] -> g ls
+(?>) :: ParTok e x -> ParTok e x -> ParTok e x
+(?>) (ParTok f) (ParTok g) = ParTok $ \ e ls -> case f e ls of
+  [] -> g e ls
   xs -> xs
 
-eat :: (LexL -> Maybe x) -> ParTok x
-eat f = ParTok $ \case
+eat :: (LexL -> Maybe x) -> ParTok e x
+eat f = ParTok $ \ e ls -> case ls of
   l : ls | Just x <- f l -> return ([l], x, ls)
   _ -> []
 
-the :: Tok Lay -> String -> ParTok ()
+penv :: ParTok e e
+penv = ParTok $ \ e ls -> [([], e, ls)]
+
+the :: Tok Lay -> String -> ParTok e ()
 the t s = eat $ \ (u, _, r) -> guard $ u == t && r == s
 
-kinda :: Tok Lay -> ParTok LexL
+kinda :: Tok Lay -> ParTok e LexL
 kinda t = eat $ \ l@(u, _, _) -> do guard $ u == t ; return l
 
-brk :: Char -> ParTok x -> ParTok x
-brk c p = ParTok $ \case
+brk :: Char -> ParTok e x -> ParTok e x
+brk c p = ParTok $ \ e ls -> case ls of
   (l@(T (LB (Sym, _, [o]) ks _), _, _) : ls) | c == o ->
-    [([l], x, ls) | (_, x, []) <- parTok p ks]
+    [([l], x, ls) | (_, x, []) <- parTok p e ks]
   _ -> []
 
-spc :: ParTok ()
-spc = ParTok $ \ ls -> let (ks, ms) = span gappy ls in [(ks, (), ms)]
+spc :: ParTok e ()
+spc = ParTok $ \ _ ls -> let (ks, ms) = span gappy ls in [(ks, (), ms)]
 
-spd :: ParTok x -> ParTok x
+spd :: ParTok e x -> ParTok e x
 spd p = id <$ spc <*> p <* spc
 
-sep :: ParTok x -> ParTok () -> ParTok [x]
+sep :: ParTok e x -> ParTok e () -> ParTok e [x]
 sep p s = (:) <$> p <*> many (id <$ s <*> p)
       <|> pure []
 
-eol :: ParTok ()
-eol = ParTok $ \case
+eol :: ParTok e ()
+eol = ParTok $ \ _ ls -> case ls of
   [] -> [([], (), [])]
   _ -> []
 
-lol :: String -> ParTok x -> ParTok (Bloc x)
-lol k p = ParTok $ \case
+lol :: String -> ParTok e x -> ParTok e (Bloc x)
+lol k p = ParTok $ \ en ls -> case ls of
   l@(T ((h, _) :-! o) , _, _) : ls | h == k ->
-    grok o >>= \ x -> [([l], x, ls)]
+    grok en o >>= \ x -> [([l], x, ls)]
   _ -> []
   where
-  grok (ss :-/ e) = (ss :-/) <$> grek e
-  grek Stop = pure Stop
-  grek (ls :-\ o) = (:-\) <$> pa ls <*> grok o
-  pa ls = [x | (_, x, []) <- parTok (p <* eol) ls]
+  grok en (ss :-/ e) = (ss :-/) <$> grek en e
+  grek en Stop = pure Stop
+  grek en (ls :-\ o) = (:-\) <$> pa en ls <*> grok en o
+  pa en ls = [x | (_, x, []) <- parTok (p <* eol) en ls]
 
-ext :: ParTok x -> ParTok ([LexL], x)
-ext p = ParTok $ \ ls -> do
-  (ks, x, us) <- parTok p ls
+ext :: ParTok e x -> ParTok e ([LexL], x)
+ext p = ParTok $ \ e ls -> do
+  (ks, x, us) <- parTok p e ls
   return (ks, (ks, x), us)
