@@ -20,3 +20,8 @@ instance Monoid (Bwd x) where
   mappend xz (yz :< y) = mappend xz yz :< y
 
 instance Semigroup (Bwd x) where (<>) = mappend
+
+(<!) :: Bwd x -> Int -> x
+(xz :< x) <! 0 = x
+(xz :< x) <! n = xz <! (n - 1)
+B0 <! _ = error "bounds error in back projection!"
