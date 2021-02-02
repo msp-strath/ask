@@ -185,6 +185,7 @@ chkSubProofs
 chkSubProofs ps = do
   ss <- demands
   (qs, us) <- traverse validSubProof ps >>= cover ss
+  True <- tracy ("COVER " ++ show (qs, us)) $ return True
   eps <- gamma >>= sprog
   vs <- extra us
   return $ glom (fmap squish qs) (eps ++ vs)
@@ -209,6 +210,7 @@ chkSubProofs ps = do
   covers t ((_, hs) ::- Make Prf g m (Keep, _) _ _) = subgoal t $ \ t -> do
     g <- mayhem $ my g
     traverse ensure hs
+    True <- tracy ("COVERS " ++ show (g, t)) $ return True
     equal Prop (g, t)
    where
     ensure (Given h) = mayhem (my h) >>= given

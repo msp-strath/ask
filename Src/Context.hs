@@ -243,7 +243,6 @@ nomBKind x = gamma >>= foldl me empty where
 ------------------------------------------------------------------------------
 
 demand :: Subgoal -> AM ()
-demand (PROVE TRUE) = return ()
 demand sg = push (Demand sg)
 
 demands :: AM [Subgoal]
