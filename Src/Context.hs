@@ -18,48 +18,132 @@ import qualified Control.Monad.Fail as Fail
 import qualified Data.Map as M
 import Control.Applicative
 import Control.Arrow ((***))
+import Data.Foldable
 
+import Ask.Src.OddEven
 import Ask.Src.Bwd
 import Ask.Src.Hide
 import Ask.Src.Tm
+import Ask.Src.Lexing
 import Ask.Src.RawAsk
 
 
 ------------------------------------------------------------------------------
---  Contexts
+--  State as Stack
 ------------------------------------------------------------------------------
 
-type Context = Bwd CxE
+type Stack = Bwd Layer
 
-data CxE -- what sort of thing is in the context?
-  = Hyp Tm
-  | Bind (Nom, Hide Tm) BKind
-  | (Nom, [Pat]) :=: Syn  -- computation rule
-  | Declare String Nom Sch
-  | RecShadow String
-  | ImplicitQuantifier
-  | (Con, [Pat]) ::> (Con, Tel)  -- constructor declaration
-  | ByRule Bool{- pukka intro?-} Rule
-  | Demand Subgoal
-  | ExpectBlocker
-  | Expect Proglem
-  | DoorStop
-  | Data
-      Con         -- name of data type
-      Context     -- constructor declarations
+data Layer = Layer
+  { myDecl :: Decl
+  , myText :: [LexL]
+  , myProb :: Elab
+  , myNext :: Int
+  , myPast :: Bwd Entry
+  , myFutu :: [Entry]
+  , myNeed :: [Need]
+  , myStat :: Status
+  } deriving Show
+
+data Need
+  = Prove Pr
   deriving Show
 
-data BKind
-  = User String
-  | Defn Tm
-  | Hole
+data Entry
+  = The Layer
+  | Gap [LexL]
+  | Ctor (Ctor ())
+  | Data (Ctor ()) [Ctor ()]
+  | Conn (Ctor ()) [Ctor [Subgoal]]
+  | Admit Con (Bind (Tel [Subgoal]))
+  | ImplicitForall
+  | Hyp Pr
+  | News News
   deriving Show
 
-data Rule =
-  (Pat, (Con, Tel)) :<=
-  [ Subgoal
-  ]
+data Status = New | Old | Fut deriving Show
+
+data Ctor x = (Con, Con) :- Tel (Tel x) deriving Show
+infixr 0 :-
+
+pattern Cons x xs = TC ":" [x, xs]
+pattern Nil = TC "[]" []
+
+dummyLayer :: Layer
+dummyLayer = Layer
+  { myDecl = Decl { nom = [], typ = Prop, wot = Purple, who = Nothing }
+  , myText = []
+  , myProb = NoElab
+  , myNext = 0
+  , myPast = B0
+  , myFutu = []
+  , myNeed = []
+  , myStat = Old
+  }
+
+
+------------------------------------------------------------------------------
+--  Elaboration Problems
+------------------------------------------------------------------------------
+
+data Elab
+  = NoElab
+  | ElabTop
+  | ElabDecl RawDecl
+  | ElabStuk Request Elab
   deriving Show
+
+data Request
+  = Solve (Bwd Decl) Nom
+  deriving Show
+
+instance Mangle Elab where
+  mangle m t = pure t
+
+
+------------------------------------------------------------------------------
+--  KickOff
+------------------------------------------------------------------------------
+
+startLayer :: Bwd Entry -> Bloc (RawDecl, [LexL]) -> Layer
+startLayer lib file = Layer
+  { myDecl = Decl
+      { nom = []
+      , typ = Prop
+      , wot = Green True (TRUE ::: Prop)
+      , who = Nothing
+      }
+  , myText = []
+  , myProb = ElabTop
+  , myNext = length file
+  , myPast = lib
+  , myFutu = go 0 file
+  , myNeed = []
+  , myStat = Old
+  } where
+  go n (g :-/ e) = Gap g : ge n e
+  ge n Stop = []
+  ge n ((r, ls) :-\ o) = The l : go (n + 1) o where
+    l = Layer
+      { myDecl = Decl
+          {nom = [("decl", n)], typ = Prop, wot = Orange, who = Nothing}
+      , myProb = ElabDecl r
+      , myText = ls
+      , myNext = 0
+      , myPast = B0
+      , myFutu = []
+      , myNeed = []
+      , myStat = New
+      }
+  
+
+------------------------------------------------------------------------------
+--  Read-Only Setup
+------------------------------------------------------------------------------
+
+data Setup = Setup
+  { fixities   :: FixityTable
+  } deriving Show
 
 
 ------------------------------------------------------------------------------
@@ -80,42 +164,22 @@ data Gripe
   | BadRec String
   | Mardiness
   | WrongNumOfArgs Con Int [Appl]
-  | DoesNotMake Con Tm
-  | OverOverload Con
+  | ConFail (Con, Con) Int -- should be 0 if we rule out dups properly
   | NonCanonicalType Tm Con
   | BadFName String
+  | Conflict Con Con
   | FAIL
   deriving Show
-
-
-------------------------------------------------------------------------------
---  Mutable AskState and Read-Only Setup
-------------------------------------------------------------------------------
-
-type Root = (Bwd (String, Int), Int)
-
-data AskState = AskState
-  { context :: Context
-  , root    :: Root
-  } deriving Show
-
-data Setup = Setup
-  { fixities   :: FixityTable
-  } deriving Show
 
 
 ------------------------------------------------------------------------------
 --  The Ask Monad
 ------------------------------------------------------------------------------
 
--- My word is my bond, the only code which needs to know the representation of
--- this very monad is in this very section of this very file.
--- How long until I welch on that?
-
 data AM x = AM {runAM
-  :: Setup     -- rules and stuff
-  -> AskState  -- vars and hyps
-  -> Either Gripe (x, AskState)}
+  :: Setup
+  -> Stack
+  -> Either Gripe (x, Stack)}
 
 instance Monad AM where
   return x    = AM $ \ _ as -> Right (x, as)
@@ -154,20 +218,70 @@ fixity o = do
     Nothing -> (9, LAsso)
     Just x  -> x
 
-mayhem :: Maybe x -> AM x
-mayhem mx = do
-  Just x <- return mx
-  return x
-
-gamma :: AM Context
-gamma = AM $ \ setup as -> Right (context as, as)
-
-setGamma :: Context -> AM ()
-setGamma ga = AM $ \ setup as -> Right ((), as {context = ga})
+mayhem :: Gripe -> Maybe x -> AM x
+mayhem gr mx = case mx of
+  Just x -> return x
+  _ -> gripe gr
 
 fresh :: String -> AM Nom
-fresh x = AM $ \ setup as -> case root as of
-  (roo, non) -> Right (roo <>> [(x, non)], as {root = (roo, non + 1)})
+fresh x = AM $ \ _ (lz :< l) -> let
+  n  = myNext l
+  xn = nom (myDecl l) ++ [(x, n)]
+  l' = l {myNext = n + 1}
+  in  Right (xn, lz :< l')
+
+seek :: (Entry -> Bool) -> AM (Bwd Entry)
+seek p = AM $ \ _ lz -> Right (foldMap go lz, lz) where
+  go l = foldMap test (myPast l)
+  test e = if p e then B0 :< e else B0
+
+problem :: AM Elab
+problem = AM $ \ _ lz@(_ :< l) -> Right (myProb l, lz)
+
+push :: Entry -> AM ()
+push e = AM $ \ _ (lz :< l) -> Right ((), lz :< l {myPast = myPast l :< e})
+
+prep :: Entry -> AM ()
+prep e = AM $ \ _ (lz :< l) -> Right ((), lz :< l {myFutu = e : myFutu l})
+
+-- remove the topmost *local* entry passing a test, leaving those above in place
+pop :: (Entry -> Bool) -> AM (Maybe Entry)
+pop test = AM $ \ _ old@(lz :< l) -> case go (myPast l) of
+  Nothing -> Right (Nothing, old)
+  Just (ga', e) ->
+    Right (Just e, lz :< l {myPast = ga'})
+ where
+  go B0 = Nothing
+  go (ga :< z)
+    | test z    = Just (ga, z)
+    | otherwise = ((:< z) *** id) <$> go ga
+
+
+
+------------------------------------------------------------------------------
+--  Constructor Lookup
+------------------------------------------------------------------------------
+
+con :: (String, String) -> AM (Tel (Tel ()))
+con dc = do
+  ez <- seek $ \case
+    Ctor _   -> True
+    Data _ _ -> True
+    Conn _ _ -> True
+    _ -> False
+  case foldMap cand ez of
+    [tel] -> return tel
+    cs -> gripe $ ConFail dc (length cs)
+ where
+  ct :: Ctor () -> [Tel (Tel ())]
+  ct (h :- tel)
+    | h == dc = [tel]
+    | otherwise = []
+  cand :: Entry -> [Tel (Tel ())]
+  cand (Ctor x) = ct x
+  cand (Data x xs) = foldMap ct (x : xs)
+  cand (Conn x _) = ct x
+  cand _ = []
 
 
 ------------------------------------------------------------------------------
@@ -175,32 +289,67 @@ fresh x = AM $ \ setup as -> case root as of
 ------------------------------------------------------------------------------
 
 -- imagine a value of a given type
-hole :: Tm -> AM Syn
-hole ty = do
-  x <- fresh "hole"
-  let xp = (x, Hide ty)
-  push $ Bind xp Hole
-  return $ TP xp
+hole :: String -> Tm -> AM Syn
+hole x ty = do
+  x <- fresh x
+  let xd = Decl
+         { nom = x
+         , typ = ty
+         , wot = Orange
+         , who = Nothing
+         }
+  let xl = dummyLayer { myDecl = xd, myStat = New }
+  push $ The xl
+  return $ TP xd
 
--- push a new context entry
-push :: CxE -> AM ()
-push z = do
-  ga <- gamma
-  setGamma (ga :< z)
+(|-) :: Mangle t => (Maybe (String, Tel Ty), Ty) -> (Syn -> AM t) -> AM (Bind t)
+(mu, ty) |- k = do
+  x <- fresh (fold (fst <$> mu))
+  let xd = Decl { nom = x, typ = ty, wot = Purple, who = mu }
+  let xl = dummyLayer { myDecl = xd }
+  push (The xl)
+  t <- k (TP xd)
+  pop $ \case { The l | myDecl l == xd -> True ; _ -> False }
+  return $ x \\ t
 
--- remove the topmost entry passing a test, leaving those above in place
-pop :: (CxE -> Bool) -> AM (Maybe CxE)
-pop test = do
-  ga <- gamma
-  case go ga of
-    Nothing      -> return Nothing
-    Just (ga, z) -> setGamma ga >> return (Just z)
- where
-  go B0 = Nothing
-  go (ga :< z)
-    | test z    = Just (ga, z)
-    | otherwise = go ga >>= \ (ga, y) -> Just (ga :< z, y)
 
+
+{-
+------------------------------------------------------------------------------
+--  Contexts
+------------------------------------------------------------------------------
+
+type Context = Bwd CxE
+
+data CxE -- what sort of thing is in the context?
+  = Hyp Tm
+  | Bind Decl
+--  | (Nom, [Pat]) :=: Syn  -- computation rule
+--  | Declare String Nom Sch
+  | RecShadow String
+  | ImplicitQuantifier
+  | (Con, Con) ::> Tel (Tel ())
+--  | ByRule Bool{- pukka intro?-} Rule
+  | Demand Subgoal
+  | ExpectBlocker
+  | Expect Proglem
+  | DoorStop
+  | Data
+      Con         -- name of data type
+      Context     -- constructor declarations
+  deriving Show
+
+{-
+data Rule =
+  (Pat, (Con, Tel)) :<=
+  [ Subgoal
+  ]
+  deriving Show
+-}
+
+
+
+{-
 -- find one of the user's variables by what they call it
 what's :: String -> AM (Either (Nom, Sch) (Syn, Tm))
 what's x = do
@@ -230,13 +379,33 @@ what's x = do
   decl (ga :< Declare y yn sch) | x == y = Just (yn, sch)
   decl (ga :< _) = decl ga
   decl B0 = Nothing
+-}
 
 -- finding one of ours
-nomBKind :: Nom -> AM BKind
-nomBKind x = gamma >>= foldl me empty where
-  me no (Bind (y, _) bk) | x == y = return bk
+nomDecl :: Nom -> AM Decl
+nomDecl x = gamma >>= foldl me empty where
+  me no (Bind d) | x == nom d = return d
   me no _ = no
 
+
+------------------------------------------------------------------------------
+--  Constructors
+------------------------------------------------------------------------------
+
+con ::
+  ( Con -- type constructor
+  , Con -- value constructor
+  ) -> AM (Tel   -- the tel which eats the type constructor's args to get...
+            (Tel   -- ...the tel which eats the value constructor's args to...
+              ()))   -- win
+con dc = (foldMap try <$> gamma) >>= \case
+  [tel] -> return tel
+  z     -> gripe $ ConFail dc (length z)
+ where
+  try (h ::> t) | dc == h = [t]
+  try (Data _ ga) = foldMap try ga
+  try _ = []
+  
 
 ------------------------------------------------------------------------------
 --  Demanding!
@@ -299,4 +468,4 @@ data Proglem = Proglem
   , rightTy  :: Tm         -- return type
   } deriving Show
 
-
+-}

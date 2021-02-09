@@ -21,7 +21,19 @@ instance Monoid (Bwd x) where
 
 instance Semigroup (Bwd x) where (<>) = mappend
 
+(<?) :: Bwd x -> Int -> Either Int x
+(xz :< x) <? 0 = Right x
+(xz :< x) <? n = xz <? (n - 1)
+B0        <? n = Left n
+
 (<!) :: Bwd x -> Int -> x
-(xz :< x) <! 0 = x
-(xz :< x) <! n = xz <! (n - 1)
-B0 <! _ = error "bounds error in back projection!"
+xz <! n = case xz <? n of
+  Right x -> x
+  Left _  -> error "hard fail for bounds error"
+
+wherez :: (x -> Bool) -> Bwd x -> Maybe Int
+wherez p = go 0 where
+  go _ B0 = Nothing
+  go i (xz :< x)
+    | p x       = Just i
+    | otherwise = go (i + 1) xz

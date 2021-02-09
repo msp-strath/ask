@@ -20,6 +20,9 @@ import Control.Applicative
 import Control.Arrow ((***))
 import Data.Monoid
 import Control.Monad.Writer
+import Control.Monad.Identity
+import qualified Data.Set as S
+import qualified Data.Map as M
 
 import Ask.Src.Bwd
 import Ask.Src.Thin
@@ -31,20 +34,20 @@ import Ask.Src.Hide
 --  Representation of Terms
 ------------------------------------------------------------------------------
 
-type Tm = Chk Syn
+type Tm = Chk  -- terms
+type Ty = Chk  -- types
+type Pr = Chk  -- propositions
 
-data Chk s
-  = TM String [s]       -- metavariable instantiation
-  | TC Con [Chk s]      -- canonical form
-  | TB (Bind (Chk s))   -- binding form
-  | TE s                -- other stuff
-  deriving (Eq, Show, Functor, Foldable, Traversable)
+data Chk
+  = TC Con [Chk]    -- canonical form
+  | TB (Bind Chk)   -- binding form
+  | TE Syn          -- other stuff
+  deriving (Eq, Show)
 
 data Syn
   = TV Int              -- de Bruijn index
-  | TP (Nom, Hide Tm)   -- named var, with cached type
-  | TF (Nom, Hide Sch) [Tm] [Tm] -- declared function, saturated for its scheme
-  | Tm ::: Tm           -- radical
+  | TP Decl             -- named var, with cached type
+  | Tm ::: Ty           -- radical
   | Syn :$ Tm           -- elimination
   deriving (Show, Eq)
 
@@ -54,6 +57,28 @@ data Bind b
   deriving (Eq, Show, Functor, Foldable, Traversable)
 
 type Con = String            -- canonical constructors get to be plain names
+
+data Decl = Decl
+  { nom :: Nom
+  , typ :: Ty
+  , wot :: Colour
+  , who :: Maybe (String, Tel Ty)
+  } deriving Show
+instance Eq  Decl where d == e = nom d == nom e
+instance Ord Decl where compare d e = compare (nom d) (nom e)
+
+data Colour
+  = Purple
+  | Orange
+  | Green Bool{-complete?-} Syn
+  | Brown
+  deriving Show
+  
+stableColour :: Colour -> Bool
+stableColour Orange      = False
+stableColour (Green b _) = b
+stableColour _           = True
+
 -- these are a few of our favourite things
 pattern Type      = TC "Type" []
 pattern Prop      = TC "Prop" []
@@ -66,265 +91,169 @@ type Nom = [(String, Int)]   -- names for parameters are chosen by the system
 
 
 ------------------------------------------------------------------------------
---  Patterns
-------------------------------------------------------------------------------
-
-data Pat
-  = PM String Thinning     -- metavariable binding site
-  | PC Con [Pat]           -- canonical pattern
-  | PB Pat                 -- binding pattern
-  deriving (Show, Eq)
-
-
-------------------------------------------------------------------------------
---  Telescopes, used to give types for constructor argument vectors
-------------------------------------------------------------------------------
-
-data Tel
-  = Ex Tm (Bind Tel)       -- implicit existential
-  | (String, Tm) :*: Tel   -- named explicit fields
-  | Pr [Tm]                -- proof obligations
-  deriving Show
-infixr 6 :*:
-
-
-------------------------------------------------------------------------------
---  Type Schemes
-------------------------------------------------------------------------------
-
-data Sch
-  = Al Tm (Bind Sch)
-  | [(String, Tm)] :>> Tm
-  deriving Show
-
-
-------------------------------------------------------------------------------
 --  Subgoals
 ------------------------------------------------------------------------------
 
-data Subgoal
-  = PROVE Tm          -- of type Prop
-  | GIVEN Tm Subgoal  -- the hyp is a Prop
-  -- more to follow, no doubt
-  deriving Show
+type Subgoal = Chk
+pattern PROVE p   = TC "prove" [p]
+pattern GIVEN h g = TC "given" [h, g]
 
+
+------------------------------------------------------------------------------
+--  Mangling
+------------------------------------------------------------------------------
+
+data Mangling f = Mangling
+  { mangV :: Int  -> f Syn    -- how to treat the de Bruijnies
+  , mangP :: Decl -> f Syn    -- how to treat the nominees
+  , mangL :: Mangling f       -- how to go under a binder
+  }
+
+class Mangle t where
+  mangle :: Applicative f => Mangling f -> t -> f t
+
+mingle :: Mangle t => Mangling Identity -> t -> t
+mingle m = runIdentity . mangle m
+
+instance Mangle t => Mangle (Bind t) where
+  mangle m (K t) = K <$> mangle m t
+  mangle m (L t) = L <$> mangle (mangL m) t
+
+instance Mangle Syn where
+  mangle m (TV i)    = mangV m i
+  mangle m (TP d)    = mangP m d
+  mangle m (f :$ s)  = (:$) <$> mangle m f <*> mangle m s
+  mangle m (t ::: u) = (:::) <$> mangle m t <*> mangle m u
+
+instance Mangle Chk where
+  mangle m (TC c ts) = TC c <$> mangle m ts
+  mangle m (TB b)    = TB <$> mangle m b
+  mangle m (TE e)    = TE <$> mangle m e
+
+instance Mangle t => Mangle [t] where
+  mangle = traverse . mangle
+
+instance Mangle Bool where
+  mangle _ = pure
+  
 
 ------------------------------------------------------------------------------
 --  Thin all the Things
 ------------------------------------------------------------------------------
 
-instance Thin s => Thin (Chk s) where
-  TM m ss <^> th = TM m (ss <^> th)
-  TC c ts <^> th = TC c (ts <^> th)
-  TB t    <^> th = TB (t <^> th)
-  TE s    <^> th = TE (s <^> th)
-  thicken th (TM m ss) = TM m <$> thicken th ss
-  thicken th (TC c ts) = TC c <$> thicken th ts
-  thicken th (TB t)    = TB <$> thicken th t
-  thicken th (TE s)    = TE <$> thicken th s
-  
+thinMang :: Thinning -> Mangling Identity
+thinMang th = Mangling
+  { mangV = \ i -> pure $ TV (i <^> th)
+  , mangP = \ d -> pure $ TP d
+  , mangL = thinMang (os th)
+  }
+
+thickMang :: Thinning -> Mangling Maybe
+thickMang th = Mangling
+  { mangV = \ i -> TV <$> thicken th i
+  , mangP = \ d -> pure $ TP d
+  , mangL = thickMang (os th)
+  }
+
+instance Thin Chk where
+  t <^> th     = mingle (thinMang th) t
+  thicken th t = mangle (thickMang th) t
+
 instance Thin Syn where
-  TV i <^> th = TV (i <^> th)
-  (t ::: _T) <^> th = (t <^> th) ::: (_T <^> th)
-  (e :$ s) <^> th = (e <^> th) :$ (s <^> th)
-  TP x <^> th = TP x
-  TF f is as <^> th = TF f (is <^> th) (as <^> th)
-  thicken th (TV i) = TV <$> thicken th i
-  thicken th (t ::: _T) = (:::) <$> thicken th t <*> thicken th _T
-  thicken th (e :$ s) = (:$) <$> thicken th e <*> thicken th s
-  thicken th (TP x) = pure (TP x)
-  thicken th (TF f is as) = TF f <$> thicken th is <*> thicken th as
-
-instance Thin s => Thin (Bind s) where
-  K s <^> th = K (s <^> th)
-  L s <^> th = L (s <^> os th)
-  thicken th (K s) = K <$> thicken th s
-  thicken th (L s) = L <$> thicken (os th) s
-
-instance Thin s => Thin [s] where
-  ss <^> th = fmap (<^> th) ss
-  thicken th ss = traverse (thicken th) ss
-
-instance Thin Tel where
-  Ex s b         <^> th = Ex (s <^> th) (b <^> th)
-  ((x, s) :*: t) <^> th = (x, s <^> th) :*: (t <^> th)
-  Pr p           <^> th = Pr (p <^> th)
-  thicken th (Ex s b)       = Ex <$> thicken th s <*> thicken th b
-  thicken th ((x, s) :*: t) = (:*:) <$> ((x,) <$> thicken th s) <*> thicken th t
-  thicken th (Pr p)         = Pr <$> thicken th p
-
-instance Thin Sch where
-  Al s t <^> th = Al (s <^> th) (t <^> th)
-  (ss :>> t) <^> th = map (id *** (<^> th)) ss :>> (t <^> th)
-  thicken th (Al s t) = Al <$> thicken th s <*> thicken th t
-  thicken th (ss :>> t) = (:>>)
-    <$> traverse (\ (x, s) -> (x,) <$> thicken th s) ss
-    <*> thicken th t
-
-instance Thin Subgoal where
-  PROVE g   <^> th = PROVE (g <^> th)
-  GIVEN h g <^> th = GIVEN (h <^> th) (g <^> th)
-  thicken th (PROVE g)   = PROVE <$> thicken th g
-  thicken th (GIVEN h g) = GIVEN <$> thicken th h <*> thicken th g
-
-instance Thin () where _ <^> _ = () ; thicken _ _ = Just ()
+  t <^> th     = mingle (thinMang th) t
+  thicken th t = mangle (thickMang th) t
 
 
 ------------------------------------------------------------------------------
---  Metavariable Matchings, instantiation, substitution
+--  Substitution and Abstraction
 ------------------------------------------------------------------------------
 
-type Matching = [(String, Chk Syn)]
+substMang :: Bwd Syn  -- V-closed terms to substitute for Vs...
+          -> Int      -- ...starting with this one
+          -> Mangling Identity
+substMang ez u = Mangling
+  { mangV = \ i -> let j = i - u in if j < 0
+     then pure $ TV i
+     else case ez <? j of
+       Right e -> pure e
+       Left k  -> pure $ TV (k + u)
+  , mangP = \ d -> pure $ TP d
+  , mangL = substMang ez (u + 1)
+  }
 
-class Stan t where
-  stan :: Matching
-       -> t -> t
-  sbst :: Int -> [Syn]
-       -> t -> t
-  abst :: Nom -> Int
-       -> t -> Writer Any t
+sbst :: Mangle t => Bwd Syn -> t -> t
+sbst ez = mingle $ substMang ez 0
 
--- yer ordinary rhythm'n'blues, yer basic rock'n'roll
-(//) :: Stan t => Bind t -> Syn -> t
-K t // e = t
-L t // e = sbst 0 [e] t
+(//) :: Mangle t => Bind t -> Syn -> t
+K t // _ = t
+L t // e = sbst (B0 :< e) t
 
-upTE :: Syn -> Tm
-upTE (t ::: _) = t
-upTE e = TE e
+abstMang :: Bwd Nom  -- names to make de Bruijn...
+         -> Int      -- ...starting here
+         -> Mangling (Writer Any)
+abstMang nz u = Mangling
+  { mangV = \ i -> pure $ TV i
+  , mangP = \ d -> case wherez (nom d ==) nz of
+      Just i  -> TV (i + u) <$ tell (Any True)
+      Nothing -> pure $ TP d
+  , mangL = abstMang nz (u + 1)
+  }
 
-(\\) :: Stan t => Nom -> t -> Bind t
-x \\ t = if getAny b then L t' else K t where
-  (t', b) = runWriter (abst x 0 t)
-
--- premature optimisation and all that, but this is ridiculous
-e4p :: Stan t => (Nom, Syn) -> t -> t
-e4p (p, e) t = (p \\ t) // e
-
-
-instance Stan s => Stan [s] where
-  stan ms = fmap (stan ms)
-  sbst u es = fmap (sbst u es)
-  abst x i = traverse (abst x i)
-
-instance (Stan s, Stan t) => Stan (s, t) where
-  stan ms = stan ms *** stan ms
-  sbst u es = sbst u es *** sbst u es
-  abst x i (s, t) = (,) <$> abst x i s <*> abst x i t
-
-instance Stan Syn where
-  stan ms (t ::: _T) = stan ms t ::: stan ms _T
-  stan ms (e :$ s) = stan ms e :$ stan ms s
-  stan ms (TF f is as) = TF f (stan ms is) (stan ms as)
-  stan ms e = e
-  sbst u es (TV i) = sg !! i where
-    sg = [TV i | i <- [0 .. (u - 1)]]
-         ++ (es <^> Th (shiftL (-1) u)) ++
-         [TV i | i <- [u ..]]
-  sbst u es (t ::: _T) = sbst u es t ::: sbst u es _T
-  sbst u es (e :$ s) = sbst u es e :$ sbst u es s
-  sbst u es (TF f is as) = TF f (sbst u es is) (sbst u es as) 
-  sbst u es e = e
-  abst x i (TP (y, _)) | x == y = TV i <$ tell (Any True)
-  abst x i (t ::: _T) = (:::) <$> abst x i t <*> abst x i _T
-  abst x i (e :$ s) = (:$) <$> abst x i e <*> abst x i s
-  abst x i (TF f is as) = TF f <$> abst x i is <*> abst x i as
-  abst x i e = pure e
-
-instance Stan Tm where
-  stan ms (TM m es) = case lookup m ms of
-    Just t  -> sbst 0 es' t
-    Nothing -> TM m es'
-   where
-    es' = map (stan ms) es
-  stan ms (TC c ts) = TC c (stan ms ts)
-  stan ms (TB b)    = TB (stan ms b)
-  stan ms (TE e)    = upTE (stan ms e)
-  sbst u es (TM m es') = TM m (sbst u es es')
-  sbst u es (TC c ts) = TC c (sbst u es ts)
-  sbst u es (TB t)    = TB (sbst u es t)
-  sbst u es (TE e)    = upTE (sbst u es e)
-  abst x i (TM m es) = TM m <$> abst x i es
-  abst x i (TC c ts) = TC c <$> abst x i ts
-  abst x i (TB b)    = TB <$> abst x i b
-  abst x i (TE e)    = TE <$> abst x i e
-
-instance Stan b => Stan (Bind b) where
-  stan ms (K b) = K (stan ms b)
-  stan ms (L b) = L (stan ms b)
-  sbst u es (K b) = K (sbst u es b)
-  sbst u es (L b) = L (sbst (u + 1) es b)
-  abst x i (K b) = K <$> abst x i b
-  abst x i (L b) = L <$> abst x (i + 1) b
-
-instance Stan Tel where
-  stan ms (Ex s b)       = Ex (stan ms s) (stan ms b)
-  stan ms ((x, s) :*: t) = (x, stan ms s) :*: stan ms t
-  stan ms (Pr p)         = Pr (stan ms p)
-  sbst u es (Ex s b)       = Ex (sbst u es s) (sbst u es b)
-  sbst u es ((x, s) :*: t) = (x, sbst u es s) :*: sbst u es t
-  sbst u es (Pr p)         = Pr (sbst u es p)
-  abst x i (Pr p) = Pr <$> abst x i p
-  abst x i (Ex s b) = Ex <$> abst x i s <*> abst x i b
-  abst x i ((y, s) :*: t) = (:*:) <$> ((y,) <$> abst x i s) <*> abst x i t
-
-instance Stan Sch where
-  stan ms (Al s t) = Al (stan ms s) (stan ms t)
-  stan ms (ss :>> t) = map (id *** stan ms) ss :>> stan ms t
-  sbst u es (Al s t) = Al (sbst u es s) (sbst u es t)
-  sbst u es (ss :>> t) = map (id *** sbst u es) ss :>> sbst u es t
-  abst x i (Al s t) = Al <$> abst x i s <*> abst x i t
-  abst x i (ss :>> t) = (:>>)
-    <$> traverse (\ (y, s) -> (y,) <$> abst x i s) ss
-    <*> abst x i t
-
-instance Stan Subgoal where
-  stan ms (PROVE g)   = PROVE (stan ms g)
-  stan ms (GIVEN h g) = GIVEN (stan ms h) (stan ms g)
-  sbst u es (PROVE g)   = PROVE (sbst u es g)
-  sbst u es (GIVEN h g) = GIVEN (sbst u es h) (sbst u es g)
-  abst x i (PROVE g) = PROVE <$> abst x i g
-  abst x i (GIVEN h g) = GIVEN <$> abst x i h <*> abst x i g
-
-instance Stan () where stan _ _ = () ; sbst _ _ _ = () ; abst _ _ _ = pure ()
+(\\) :: Mangle t => Nom -> t -> Bind t
+x \\ t = if b then L t' else K t
+  where (t', Any b) = runWriter $ mangle (abstMang (B0 :< x) 0) t
 
 
 ------------------------------------------------------------------------------
---  Metavariable dependency testing and topological insertion
+--  Support
 ------------------------------------------------------------------------------
 
-class MDep t where
-  mDep :: String -> t -> Bool
+suppMang :: Mangling (Const (S.Set Decl))
+suppMang = Mangling
+  { mangV = const $ Const mempty
+  , mangP = Const . S.singleton
+  , mangL = suppMang
+  }
 
-instance MDep Tm where
-  mDep x (TM m es) = m == x || mDep x es
-  mDep x (TC _ ts) = mDep x ts
-  mDep x (TB t) = mDep x t
-  mDep x (TE e) = mDep x e
+support :: Mangle t => t -> S.Set Decl
+support = getConst . mangle suppMang
 
-instance MDep Syn where
-  mDep x (t ::: ty) = mDep x t || mDep x ty
-  mDep x (f :$ s) = mDep x f || mDep x s
-  mDep x (TF _ is as) = mDep x is || mDep x as
-  mDep x _ = False
+stable :: Mangle t => t -> Bool
+stable = all (stableColour . wot) . support
 
-instance MDep x => MDep [x] where
-  mDep x = any (mDep x)
 
-instance MDep b => MDep (Bind b) where
-  mDep x (K t) = mDep x t
-  mDep x (L t) = mDep x t
+------------------------------------------------------------------------------
+--  News
+------------------------------------------------------------------------------
 
-topInsert :: MDep t =>
-  ((String, t), z) -> [((String, t), z)] -> [((String, t), z)]
-topInsert b = go (B0 :< b) where
-  go bz [] = bz <>> []
-  go bz (a@((_, t), _) : as)
-    | any (\ ((x, _), _) -> mDep x t) bz = go (bz :< a) as
-    | otherwise = a : go bz as
+type News = M.Map Nom Decl
 
-topSort :: MDep t => [((String, t), z)] -> Maybe [((String, t), z)]
-topSort as = if all ok (tails bs) then Just bs else Nothing where
-  bs = foldl (flip topInsert) [] as
-  ok [] = True
-  ok (((_, t), _) : zs) = all (\ ((x, _), _) -> not (mDep x t)) zs
+newsMang :: News -> Mangling (Writer Any)
+newsMang news = m where
+  m = Mangling
+    { mangV = \ i -> pure (TV i)
+    , mangP = \ d -> case M.lookup (nom d) news of
+        Just d -> TP d <$ tell (Any True)
+        Nothing -> pure (TP d)
+    , mangL = m
+    }
+
+
+------------------------------------------------------------------------------
+--  Telescopes
+------------------------------------------------------------------------------
+
+-- Telescopes are a term monad for programs which consume lists of payload...
+-- ...but there's a twist.
+
+type Tel x = Chk
+
+pattern Sg x s b = TC "'Sg" [x, s, TB b]
+  -- where x is one of
+pattern Impl s b = Sg (TC "Impl" []) s b
+pattern Expl s b = Sg (TC "Expl" []) s b
+
+pattern Pr p t = TC "'Pr" [p, t]     -- proof obligation
+pattern Re x   = TC "'Re" [x]        -- return
+
+pattern Ok = TC "()" []

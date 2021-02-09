@@ -19,50 +19,43 @@ myFixities = M.fromList
   , ("->", (1, RAsso))
   ]
 
-myPreamble :: Context
+myPreamble :: Bwd Entry
 myPreamble = B0
-  :< (("Type", []) ::> ("Type", Pr []))   -- boo! hiss!
-  :< (("Type", []) ::> ("Prop", Pr []))
-  :< (("Type", []) ::> ("->", ("s", Type) :*: ("t", Type) :*: Pr []))
-  :< (("Prop", []) ::> ("->", ("s", Prop) :*: ("t", Prop) :*: Pr []))
-  :< (("Prop", []) ::> ("&", ("s", Prop) :*: ("t", Prop) :*: Pr []))
-  :< (("Prop", []) ::> ("|", ("s", Prop) :*: ("t", Prop) :*: Pr []))
-  :< (("Prop", []) ::> ("Not", ("s", Prop) :*: Pr []))
-  :< (("Prop", []) ::> ("False", Pr []))
-  :< (("Prop", []) ::> ("True", Pr []))
-  :< (("Prop", []) ::> ("=", Ex Type . L $
-                        ("x", TE (TV 0)) :*: ("y", TE (TV 0)) :*: Pr []))
-
-myIntroRules :: [Rule]
-myIntroRules =
-  [ (PC "&" [PM "a" mempty, PM "b" mempty], ("AndI", Pr [])) :<=
-    [ PROVE $ TM "a" []
-    , PROVE $ TM "b" []
-    ]
-  , (PC "|" [PM "a" mempty, PM "b" mempty], ("OrIL", Pr [])) :<=
-    [ PROVE $ TM "a" []
-    ]
-  , (PC "|" [PM "a" mempty, PM "b" mempty], ("OrIR", Pr [])) :<=
-    [ PROVE $ TM "b" []
-    ]
-  , (PC "->" [PM "a" mempty, PM "b" mempty], ("ImpI", Pr [])) :<=
-    [ GIVEN (TM "a" []) . PROVE $ TM "b" []
-    ]
-  , (PC "Not" [PM "a" mempty], ("NotI", Pr [])) :<=
-    [ GIVEN (TM "a" []) . PROVE $ TC "False" []
-    ]
-  , (PC "True" [], ("TrueI", Pr [])) :<= []
-  ]
-
-myWeirdRules :: [Rule]
-myWeirdRules =
-  [ (PM "x" mempty, ("Contradiction", Pr [])) :<=
-    [ GIVEN (TC "Not" [TM "x" []]) $ PROVE FALSE
-    ]
-  ]
-
-myContext :: Context
-myContext = myPreamble
-  <>< [ByRule True  r | r <- myIntroRules]
-  <>< [ByRule False r | r <- myWeirdRules]
-
+  :< Ctor (("Type", "Type") :- Re . Re $ Ok)
+  :< Ctor (("Type", "Prop") :- Re . Re $ Ok)
+  :< Ctor (("Type", "->") :- Re . Expl Type . K . Expl Type . K . Re $ Ok)
+  :< Ctor (("Prop", "=") :-
+       Re . Impl Type . L . Expl (TE (TV 0)) . K . Expl (TE (TV 0)) . K .
+       Re $ Ok)
+  :< Conn (("Prop", "False") :- Re . Re $ Ok) []
+  :< Conn (("Prop", "True") :- Re . Re $ Ok)
+       [ ("True", "TrueI") :- Re . Re $ Nil
+       ]
+  :< Conn (("Prop", "->") :- Re . Expl Prop . K . Expl Prop . K . Re $ Ok)
+       [ ("->", "ImpI") :- Expl Prop . L . Expl Prop . L . Re .
+         Cons (GIVEN (TE (TV 1)) $ PROVE (TE (TV 0))) $
+         Nil
+       ]
+  :< Conn (("Prop", "&") :- Re . Expl Prop . K . Expl Prop . K . Re $ Ok)
+       [ ("&", "AndI") :- Expl Prop . L . Expl Prop . L . Re .
+         Cons (PROVE (TE (TV 1))) .
+         Cons (PROVE (TE (TV 0))) $
+         Nil
+       ]
+  :< Conn (("Prop", "|") :- Re . Expl Prop . K . Expl Prop . K . Re $ Ok)
+       [ ("|", "OrIL") :- Expl Prop . L . Expl Prop . K . Re .
+         Cons (PROVE (TE (TV 0))) $
+         Nil
+       , ("|", "OrIR") :- Expl Prop . K . Expl Prop . L . Re .
+         Cons (PROVE (TE (TV 0))) $
+         Nil
+       ]
+  :< Conn (("Prop", "Not") :- Re . Expl Prop . K . Re $ Ok)
+       [ ("Not", "NotI") :- Expl Prop . L . Re .
+         Cons (GIVEN (TE (TV 0)) $ PROVE FALSE) $
+         Nil
+       ]
+  :< Admit "Contradiction" (L . Re .
+       Cons (GIVEN (TC "Not" [TE (TV 0)]) $ PROVE FALSE) $
+       Nil
+       )

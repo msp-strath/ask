@@ -34,7 +34,7 @@ data RawDecl
   | RawData Appl [Appl]
   | RawSig Appl Appl
   | RawTest Appl (Maybe Appl)
-  | RawProof (Make () Appl)
+  | RawProof (SubMake () Appl)
   deriving Show
   
 data RawIntro
@@ -130,7 +130,7 @@ pDecl = good <* eol where
      <|> RawTest <$ (the Key "test" <|> the Key "tested") <* spc
            <*> pAppl ["="] <*>
            (Just <$ spd (the Sym "=") <*> pAppl [] <|> pure Nothing)
-     <|> RawProof <$> pMake
+     <|> RawProof <$> pSubMake
   agree (ft, at) = at <$ guard (all id $ M.intersectionWith (==) at ft)
 
 pProp :: PF (Appl, Bloc RawIntro)
@@ -157,6 +157,14 @@ pIntro h = do
 
 pData :: PF (Appl, [Appl])
 pData = (,) <$ spc <*> pAppl ["="] <* spd (the Sym "=") <*> sep (pAppl ["|"]) (spd (the Sym "|"))
+
+pSubMake :: PF (SubMake () Appl)
+pSubMake = ((::-) <$> ext (pGivens <* spc) <*> pMake <* spc <* eol)
+      ?> ((SubPGuff . fst) <$> ext (many (eat Just) <* eol))
+  where
+  pGivens
+    =   id <$ the Key "given" <* spc <*> sep (Given <$> pAppl []) (spd (the Sym ","))
+    <|> pure []
 
 pMake :: PF (Make () Appl)
 pMake = do
@@ -188,12 +196,7 @@ pMake = do
            Def -> Is <$ the Sym "=" <* spc <*> pAppl []
               <|> Ind <$ the Key "inductively" <* spc <*>
                     sep (txt <$> kinda Lid) (spd (the Sym ","))
-  pSubs = lol "where" pSub <|> pure ([] :-/ Stop)
-  pSub = ((::-) <$> ext (pGivens <* spc) <*> pMake <* spc <* eol)
-      ?> ((SubPGuff . fst) <$> ext (many (eat Just) <* eol))
-  pGivens
-    =   id <$ the Key "given" <* spc <*> sep (Given <$> pAppl []) (spd (the Sym ","))
-    <|> pure []
+  pSubs = lol "where" pSubMake <|> pure ([] :-/ Stop)
 
 getFixities :: Bloc [LexL] -> FixityTable
 getFixities = foldMap (glom . parTok mkFixity mempty) where
@@ -235,8 +238,10 @@ instance Show Appl' where
 ($$) :: Appl' -> [Appl] -> Appl'
 (h :$$ as) $$ bs = h :$$ (as ++ bs)
 
+{-
 instance MDep Appl where
   mDep x (_, (_, _, y) :$$ as) = x == y || any (mDep x) as
+-}
 
 -- FIXME: support tuples but not by treating comma as infix
 pAppl :: [String] -- , and ` are already not allowed to be infix
