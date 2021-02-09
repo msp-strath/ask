@@ -123,6 +123,9 @@ ppGripe (NotGiven p) = do
 ppGripe (NotARule (ls, _)) = return $ rfold lout ls " is not the right shape to be a rule."
 ppGripe Mardiness = return $
   "I seem to be unhappy but I can't articulate why, except that it's Conor's fault."
+ppGripe (NotADataType t) = do
+  t <- ppTm AllOK t
+  return $ t ++ " is not a data type and cannot be split into cases"
 ppGripe (WrongNumOfArgs c n as) = return $
   c ++ " expects " ++ count n ++ " but you have given it " ++ blat as
   where

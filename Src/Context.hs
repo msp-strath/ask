@@ -79,6 +79,7 @@ data Gripe
   | NotARule Appl
   | BadRec String
   | Mardiness
+  | NotADataType Tm
   | WrongNumOfArgs Con Int [Appl]
   | DoesNotMake Con Tm
   | OverOverload Con

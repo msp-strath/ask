@@ -610,6 +610,7 @@ conSplit t = do
     _ -> gripe FAIL
   (foldMap (\case {Data e de | d == e -> [de]; _ -> []}) <$> gamma) >>= \case
     [de] -> concat <$> traverse (refine z) de
+    _ -> gripe $ NotADataType t
  where
   refine :: (Tel -> Tel, Con, [Tm]) -> CxE -> AM [(Con, Tel)]
   refine (monkey, d, ts) ((e, ps) ::> (c, tel)) | d == e = cope (do
