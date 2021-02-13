@@ -23,10 +23,17 @@ myPreamble :: Bwd Entry
 myPreamble = B0
   :< Ctor (("Type", "Type") :- Re . Re $ Ok)
   :< Ctor (("Type", "Prop") :- Re . Re $ Ok)
+  :< Data (("Type", "'Sigma") :- Re .
+             Expl Type . L . Expl (TE (TV 0) :-> Type) . K . Re $ Ok)
+          [("'Sigma", "(,)") :-
+             Expl Type . L . Expl (TE (TV 0) :-> Type) . L . Re .
+             Expl (TE (TV 1)) . L . Expl (TE (TV 1 :$ TE (TV 0))) . K . Re $ Ok
+          ]
   :< Ctor (("Type", "->") :- Re . Expl Type . K . Expl Type . K . Re $ Ok)
   :< Ctor (("Prop", "=") :-
        Re . Impl Type . L . Expl (TE (TV 0)) . K . Expl (TE (TV 0)) . K .
        Re $ Ok)
+  :< Ctor (("Prop", "'<=") :- Re . Expl Type . K . Expl Type . K . Re $ Ok)
   :< Conn (("Prop", "False") :- Re . Re $ Ok) []
   :< Conn (("Prop", "True") :- Re . Re $ Ok)
        [ ("True", "TrueI") :- Re . Re $ Nil

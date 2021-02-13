@@ -58,7 +58,9 @@ data Entry
   | Admit Con (Bind (Tel [Subgoal]))
   | ImplicitForall
   | Hyp Pr
-  | News News
+  | Fred Appl Pr    -- Fred hopes this proposition is true somehow
+  | Solve Appl Decl Syn
+  | Pend News
   deriving Show
 
 data Status = New | Old | Fut deriving Show
@@ -88,17 +90,28 @@ dummyLayer = Layer
 
 data Elab
   = NoElab
+  | ElabDone Syn
   | ElabTop
+  | ElabGripe Gripe
   | ElabDecl RawDecl
   | ElabStuk Request Elab
+  | ElabChk Ty Appl
+  | ElabSyn Appl
   deriving Show
 
 data Request
-  = Solve (Bwd Decl) Nom
+  = Canon Syn
   deriving Show
 
 instance Mangle Elab where
+  mangle m (ElabDone e) = ElabDone <$> mangle m e
+  mangle m (ElabStuk r p) = ElabStuk <$> mangle m r <*> mangle m p
+  mangle m (ElabChk ty a) = ElabChk <$> mangle m ty <*> pure a
   mangle m t = pure t
+
+instance Mangle Request where
+  mangle m (Canon e)    = Canon <$> mangle m e
+
 
 
 ------------------------------------------------------------------------------
@@ -152,9 +165,12 @@ data Setup = Setup
 
 data Gripe
   = Surplus
+  | SyntaxError
   | Duplication Tm Con
   | AlreadyDeclared String
   | Scope String
+  | SubTypeError Appl Ty Ty
+  | UnificationError Appl Tm Tm Ty
   | ByBadRule String Tm
   | ByAmbiguous String Tm
   | FromNeedsConnective Appl
@@ -163,6 +179,8 @@ data Gripe
   | NotARule Appl
   | BadRec String
   | Mardiness
+  | Underapplied Appl
+  | Arity (Con, Tel ()) [Appl]
   | WrongNumOfArgs Con Int [Appl]
   | ConFail (Con, Con) Int -- should be 0 if we rule out dups properly
   | NonCanonicalType Tm Con
@@ -207,6 +225,11 @@ cope :: AM x -> (Gripe -> AM y) -> (x -> AM y) -> AM y
 cope (AM f) yuk wow = AM $ \ setup as -> case f setup as of
   Left g        -> runAM (yuk g) setup as
   Right (x, as) -> runAM (wow x) setup as
+
+terror :: AM x -> Gripe -> AM x
+terror t gr = cope t h return where
+  h FAIL = gripe gr
+  h gr   = gripe gr
 
 setup :: AM Setup
 setup = AM $ \ setup as -> Right (setup, as)
@@ -262,26 +285,25 @@ pop test = AM $ \ _ old@(lz :< l) -> case go (myPast l) of
 --  Constructor Lookup
 ------------------------------------------------------------------------------
 
+lesConstructeurs :: AM [Ctor ()]
+lesConstructeurs = foldMap cand <$> seek (const True) where
+  cand (Ctor x)    = [x]
+  cand (Data x xs) = x : xs
+  cand (Conn x _)  = [x]
+  cand _ = []
+
 con :: (String, String) -> AM (Tel (Tel ()))
 con dc = do
-  ez <- seek $ \case
-    Ctor _   -> True
-    Data _ _ -> True
-    Conn _ _ -> True
-    _ -> False
-  case foldMap cand ez of
+  cs <- lesConstructeurs
+  case [tel | h :- tel <- cs, h == dc] of
     [tel] -> return tel
     cs -> gripe $ ConFail dc (length cs)
- where
-  ct :: Ctor () -> [Tel (Tel ())]
-  ct (h :- tel)
-    | h == dc = [tel]
-    | otherwise = []
-  cand :: Entry -> [Tel (Tel ())]
-  cand (Ctor x) = ct x
-  cand (Data x xs) = foldMap ct (x : xs)
-  cand (Conn x _) = ct x
-  cand _ = []
+
+anyCon :: String -> AM [(String, Tel (Tel ()))]
+anyCon c = do
+  cs <- lesConstructeurs
+  return [(d, tel) | (d, c') :- tel <- cs, c == c']
+
 
 
 ------------------------------------------------------------------------------
@@ -302,6 +324,11 @@ hole x ty = do
   push $ The xl
   return $ TP xd
 
+orange :: Decl -> Bool
+orange x = case wot x of
+  Orange -> True
+  _ -> False
+
 (|-) :: Mangle t => (Maybe (String, Tel Ty), Ty) -> (Syn -> AM t) -> AM (Bind t)
 (mu, ty) |- k = do
   x <- fresh (fold (fst <$> mu))
@@ -312,6 +339,26 @@ hole x ty = do
   pop $ \case { The l | myDecl l == xd -> True ; _ -> False }
   return $ x \\ t
 
+
+------------------------------------------------------------------------------
+--  Machinery
+------------------------------------------------------------------------------
+
+topol :: (Layer -> AM x) -> AM x
+topol f = do
+  l <- AM $ \ _ lz@(_ :< l) -> Right (l, lz)
+  f l
+
+topov :: AM Layer
+topov = AM $ \ _ (lz :< l) -> Right (l, lz)
+
+topon :: Layer -> AM ()
+topon l = AM $ \ _ lz -> Right ((), lz :< l)
+
+topox :: Gripe -> AM ()
+topox gr = AM $ \ _ lz -> case lz of
+  B0 -> Left gr
+  _  -> Right ((), lz)
 
 
 {-

@@ -31,6 +31,13 @@ xz <! n = case xz <? n of
   Right x -> x
   Left _  -> error "hard fail for bounds error"
 
+nearest :: (x -> Maybe y) -> Bwd x -> Maybe (Bwd x, y, [x])
+nearest p xz = go xz [] where
+  go B0 _ = Nothing
+  go (xz :< x) xs = case p x of
+    Just y -> Just (xz, y, xs)
+    Nothing -> go xz (x : xs)
+
 wherez :: (x -> Bool) -> Bwd x -> Maybe Int
 wherez p = go 0 where
   go _ B0 = Nothing

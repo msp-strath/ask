@@ -12,9 +12,14 @@
 
 module Ask.Src.Computing where
 
+import Debug.Trace
+
 import Ask.Src.Bwd
 import Ask.Src.Tm
 import Ask.Src.Context
+
+
+truck = const id
 
 
 ------------------------------------------------------------------------------
@@ -54,9 +59,16 @@ hnfSyn (tm ::: ty) = do
 hnfSyn (e :$ s) = do
   (e, ty) <- hnfSyn e
   case ty of
-    TC "->" [dom, ran] -> case e of
+    dom :-> ran -> case e of
       TB b ::: _ -> hnfSyn $ (b // (s ::: dom)) ::: ran
       _ -> return (e :$ s, ran)
+    Sigma a b -> case (e, s) of
+      (Pair s t ::: _, Fst) -> hnfSyn $ (s ::: a)
+      (_, Fst) -> return (e :$ Fst, a)
+      (Pair s t ::: _, Snd) -> hnfSyn $ (t ::: (b // (s ::: a)))
+      (_, Snd) -> return (e :$ Snd, b // (e :$ Fst))
+      _ -> gripe Mardiness
+      
 {-
     TC d ss -> case s of
       TC c [TB m, tel, s'] -> let ty = m // e in case e of
@@ -70,6 +82,15 @@ hnfSyn (e :$ s) = do
 -}
     _ -> gripe Mardiness
 
+chkTE :: Ty -> Syn -> AM Chk
+chkTE trg e = do
+  (_, src) <- hnfSyn e
+  subtype src trg >>= \case
+    True -> case e of
+      t ::: _ -> return t
+      _       -> return (TE e)
+    False -> return (TE e)
+
 ship :: Syn -> Chk -> Chk -> AM Chk
 ship e src trg = subtype src trg >>= \case
   True -> case e of
@@ -82,7 +103,7 @@ ship e src trg = subtype src trg >>= \case
       tel  <- conTell (d, ss)  c
       tel' <- conTell (d, ss') c
       TC c <$> ships ts tel tel'
-    _ -> return (TE (TE e ::: trg))
+    _ -> return (TE e)
 
 ships :: [Chk] -> Chk -> Chk -> AM [Chk]
 ships [] _ _ = return []
@@ -175,6 +196,7 @@ conTel
   -> (Con, [Tm])  -- the type constructor and its arguments
   -> Con          -- the value constructor we want to know about
   -> AM (Tel ())  -- the telescope which should eat the constructor's fields
+conTel _ _ dss c | truck ("CONTEL " ++ show dss ++ " " ++ c) False = undefined
 conTel ha de (d, ss) c = do
   tel <- con (d, c)
   snd <$> runTel ha de tel ss
@@ -199,6 +221,8 @@ runTel ha de = go B0 where
       _ -> gripe Mardiness
     (_, tel) <- go B0 tel rs
     go ytz tel xs
+  go ytz tel as = error
+    ("RUNTEL " ++ show ytz ++ " " ++ show tel ++ " " ++ show as)
 
 -- and when we're supposed to have well typed stuff already
 

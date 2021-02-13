@@ -63,7 +63,9 @@ data Decl = Decl
   , typ :: Ty
   , wot :: Colour
   , who :: Maybe (String, Tel Ty)
-  } deriving Show
+  }
+instance Show Decl where
+  show d = show (nom d) ++ "(" ++ show (wot d) ++ ")"
 instance Eq  Decl where d == e = nom d == nom e
 instance Ord Decl where compare d e = compare (nom d) (nom e)
 
@@ -79,6 +81,9 @@ stableColour Orange      = False
 stableColour (Green b _) = b
 stableColour _           = True
 
+green :: Syn -> Colour
+green e = Green (stable e) e
+
 -- these are a few of our favourite things
 pattern Type      = TC "Type" []
 pattern Prop      = TC "Prop" []
@@ -86,6 +91,12 @@ pattern TRUE      = TC "True" []
 pattern FALSE     = TC "False" []
 pattern (:->) s t = TC "->" [s, t]
 pattern Zone      = TC "$$" []  -- a type which gets hypothetically inhabited
+pattern Sigma a b = TC "'Sigma" [a, TB b]
+pattern Pair s t  = TC "(,)" [s, t]
+pattern Fst       = TC "Fst" []
+pattern Snd       = TC "Snd" []
+pattern Sub s t   = TC "'<=" [s, t]
+pattern Q ty l r  = TC "=" [ty, l, r]
 
 type Nom = [(String, Int)]   -- names for parameters are chosen by the system
 
@@ -133,8 +144,22 @@ instance Mangle Chk where
 instance Mangle t => Mangle [t] where
   mangle = traverse . mangle
 
+instance Mangle t => Mangle (Bwd t) where
+  mangle = traverse . mangle
+
+instance (Mangle s, Mangle t) => Mangle (s, t) where
+  mangle m (s, t) = (,) <$> mangle m s <*> mangle m t
+
 instance Mangle Bool where
   mangle _ = pure
+
+instance Mangle Decl where
+  mangle m (Decl nom ty wot who) =
+    Decl nom <$> mangle m ty <*> mangle m wot <*> pure who
+
+instance Mangle Colour where
+  mangle m (Green b tm) = green <$> mangle m tm
+  mangle m c = pure c
   
 
 ------------------------------------------------------------------------------
@@ -221,22 +246,47 @@ support = getConst . mangle suppMang
 stable :: Mangle t => t -> Bool
 stable = all (stableColour . wot) . support
 
+-- not the finest dep-check known to humanity
+dep :: Mangle t => Decl -> t -> Bool
+dep x = any (x ==) . support 
+
 
 ------------------------------------------------------------------------------
 --  News
 ------------------------------------------------------------------------------
 
-type News = M.Map Nom Decl
+newtype News = News {news :: M.Map Nom Decl} deriving Show
 
 newsMang :: News -> Mangling (Writer Any)
-newsMang news = m where
+newsMang (News n) = m where
   m = Mangling
     { mangV = \ i -> pure (TV i)
-    , mangP = \ d -> case M.lookup (nom d) news of
+    , mangP = \ d -> case M.lookup (nom d) n of
         Just d -> TP d <$ tell (Any True)
         Nothing -> pure (TP d)
     , mangL = m
     }
+
+update :: Mangle t => News -> t -> t
+update n t = t' where
+  (t' , _) = runWriter $ mangle (newsMang n) t
+
+(%=) :: Nom -> Decl -> News
+x %= d = News $ M.singleton x d
+
+instance Mangle News where
+  mangle m (News news) = News <$> traverse (mangle m) news
+
+instance Monoid News where
+  mempty = News $ M.empty
+  mappend n@(News newer) (News older) =
+    News $ newer <> older'
+    where
+    News older' = update n (News (M.difference older newer))
+instance Semigroup News where (<>) = mappend
+
+(><) :: News -> News -> News
+News a >< News b = News (a <> b)
 
 
 ------------------------------------------------------------------------------
