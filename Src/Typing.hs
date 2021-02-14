@@ -60,24 +60,25 @@ hnfSyn :: Syn -> AM Syn
 hnfSyn e | track ("HNFSYN " ++ show e) False = undefined
 hnfSyn e = case fnarg e [] of
   Nothing -> hnfSyn' e
-  Just (f, is, as, ss) ->
-    (concat <$> (gamma >>= traverse (reds f (is ++ as ++ ss)))) >>= \case
-    []     -> return e
-    e : _  -> hnfSyn e
+  Just (f, is, as, ss) -> do
+    prog <- foldMap (red f) <$> gamma
+    run prog (is ++ as ++ ss)
  where
-  reds x ss ((y, ps) :=: e) | x == y =
-    cope (do
-        (m, ss) <- snarf [] ps ss
-        return [foldl (:$) (stan m e) ss]
-      )
-      (\ gr -> return [])
-      return
-  reds _ _ _ = return []
-  snarf m [] ss = return (m, ss)
-  snarf m (p : ps) (s : ss) = do
-    m' <- maAM (p, s)
-    snarf (m' ++ m) ps ss
-  snarf _ _ _ = gripe FAIL
+  red f ((g, ps) :=: e) | f == g = [(ps, e)]
+  red f _ = []
+  run :: [([Pat], Syn)] -> [Tm] -> AM Syn
+  run [] _ = return e
+  run ((ps, e) : prog) ts = snarf ps ts >>= \case
+    Left ts -> run prog ts
+    Right (m, ts) -> hnfSyn $ foldl (:$) (stan m e) ts
+  snarf :: [Pat] -> [Tm] -> AM (Either [Tm] (Matching, [Tm]))
+  snarf [] ts = return $ Right ([], ts)
+  snarf (p : ps) [] = return $ Left []
+  snarf (p : ps) (t : ts) = maKAM (p, t) >>= \case
+    (t, Nothing) -> return $ Left (t : ts)
+    (t, Just m) -> snarf ps ts >>= \case
+      Left ts -> return $ Left (t : ts)
+      Right (m', ts) -> return $ Right (m ++ m', ts)
 
 hnfSyn' :: Syn -> AM Syn
 hnfSyn' e@(TP (x, Hide ty)) = do
@@ -175,6 +176,25 @@ maAM (p, t) = go mempty (p, t) where
     TB (K t) -> go (o' ph) (p, t)
     TB (L t) -> go (os ph) (p, t)
     _ -> gripe FAIL
+
+maKAM :: (Pat, Tm) -> AM (Tm, Maybe Matching)
+maKAM (p, t) = go mempty (p, t) where
+  go :: Thinning -> (Pat, Tm) -> AM (Tm, Maybe Matching)
+  go ph (PM m th, t) = (t,) <$> case thicken th (t <^> ph) of
+    Nothing -> return Nothing
+    Just t -> return (Just [(m, t)])
+  go ph (PC x ps, t) = hnf t >>= \case
+    t@(TC y ts) | x == y -> case halfZip ps ts of
+      Nothing -> return (t, Nothing)
+      Just pts -> traverse (go ph) pts >>= \ tmms ->
+        return (TC y (map fst tmms), concat <$> traverse snd tmms)
+    t -> return (t, Nothing)
+  go ph (PB p, t) = hnf t >>= \ t -> case t of
+    TB (K t) -> go (o' ph) (p, t) >>= \case
+      (t, mm) -> return (TB (K t), mm)
+    TB (L t) -> go (os ph) (p, t) >>= \case
+      (t, mm) -> return (TB (L t), mm)
+    t -> return (t, Nothing)
 
 
 ------------------------------------------------------------------------------
