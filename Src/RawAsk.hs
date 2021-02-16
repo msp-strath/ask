@@ -213,6 +213,7 @@ mkFixity = actual ?> pure M.empty where
   fixl (Num, _, s) = case read s of
     l | 0 <= l && l <= 9 -> Just l
     _ -> Nothing
+  fixl _ = Nothing
   oppo :: PF String
   oppo = id <$ the Sym "`" <*> eat lust <* the Sym "`"
      <|> eat sop
