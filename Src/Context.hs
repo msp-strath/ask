@@ -90,19 +90,18 @@ data Gripe
 
 
 ------------------------------------------------------------------------------
---  Mutable AskState and Read-Only Setup
+--  Mutable AskState -- and Read-Only Setup
 ------------------------------------------------------------------------------
 
 type Root = (Bwd (String, Int), Int)
 
 data AskState = AskState
-  { context :: Context
-  , root    :: Root
+  { context  :: Context
+  , root     :: Root
+  , fixities :: FixityTable
   } deriving Show
 
-data Setup = Setup
-  { fixities   :: FixityTable
-  } deriving Show
+type Setup = () -- atavism
 
 
 ------------------------------------------------------------------------------
@@ -114,7 +113,7 @@ data Setup = Setup
 -- How long until I welch on that?
 
 data AM x = AM {runAM
-  :: Setup     -- rules and stuff
+  :: Setup     -- nowt of consequence
   -> AskState  -- vars and hyps
   -> Either Gripe (x, AskState)}
 
@@ -145,13 +144,16 @@ cope (AM f) yuk wow = AM $ \ setup as -> case f setup as of
   Left g        -> runAM (yuk g) setup as
   Right (x, as) -> runAM (wow x) setup as
 
-setup :: AM Setup
-setup = AM $ \ setup as -> Right (setup, as)
+getFixities :: AM FixityTable
+getFixities = AM $ \ _ s -> Right (fixities s, s)
+
+setFixities :: FixityTable -> AM ()
+setFixities ft = AM $ \ _ s -> Right ((), s {fixities = ft})
 
 fixity :: String -> AM (Int, Assocy)
 fixity o = do
-  s <- setup
-  return $ case M.lookup o (fixities s) of
+  ft <- getFixities
+  return $ case M.lookup o ft of
     Nothing -> (9, LAsso)
     Just x  -> x
 

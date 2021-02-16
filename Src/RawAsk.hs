@@ -108,11 +108,12 @@ instance (Show a, Show t) => Show (SubMake a t) where
 --  Lex and Parse
 ------------------------------------------------------------------------------
 
-raw :: FixityTable -> String -> Bloc (RawDecl, [LexL])
-raw fi input = fmap (grok (fi <> ft)) ls where
+raw :: FixityTable -> String -> (FixityTable, Bloc (RawDecl, [LexL]))
+raw fi input = (fo, fmap grok ls) where
   ls = lexAll input
-  ft = getFixities ls
-  grok ft l = case parTok pDecl ft l of
+  ft = newFixities ls
+  fo = fi <> ft
+  grok l = case parTok pDecl fo l of
     [(_, x, [])] -> (x, l)
     _ -> (RawSewage, l)
 
@@ -195,8 +196,8 @@ pMake = do
     =   id <$ the Key "given" <* spc <*> sep (Given <$> pAppl []) (spd (the Sym ","))
     <|> pure []
 
-getFixities :: Bloc [LexL] -> FixityTable
-getFixities = foldMap (glom . parTok mkFixity mempty) where
+newFixities :: Bloc [LexL] -> FixityTable
+newFixities = foldMap (glom . parTok mkFixity mempty) where
   glom [(_,t,_)] = t
   glom _ = M.empty
 

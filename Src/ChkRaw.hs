@@ -648,37 +648,40 @@ askRawDecl (RawSewage, ls) = return $ "{- don't ask\n" ++ rfold lout ls "\n-}"
 askRawDecl (_, ls) = return $ rfold lout ls ""
 
 filth :: String -> String
-filth s = case runAM go mySetup initAskState of
+filth s = case runAM go () initAskState of
   Left e -> "OH NO! " ++ show e
   Right (s, _) -> s
  where
   go :: AM String
   go = do
-    ftab <- fixities <$> setup
-    bifoldMap (($ "") . rfold lout) id <$> traverse askRawDecl (raw ftab s)
+    ftab <- getFixities
+    bifoldMap (($ "") . rfold lout) id <$> traverse askRawDecl (snd $ raw ftab s)
 
 ordure :: String -> String
-ordure s = case runAM go mySetup initAskState of
+ordure s = case runAM go () initAskState of
   Left e -> "OH NO! " ++ show e
   Right (s, as) -> s ++ "\n-------------------------\n" ++ show as
  where
   go :: AM String
   go = do
-    ftab <- fixities <$> setup
-    bifoldMap (($ "") . rfold lout) id <$> traverse askRawDecl (raw ftab s)
+    ft <- getFixities
+    bifoldMap (($ "") . rfold lout) id <$> traverse askRawDecl (snd $ raw ft s)
 
 initAskState :: AskState
 initAskState = AskState
-  { context = myContext
-  , root    = (B0, 0)
+  { context  = myContext
+  , root     = (B0, 0)
+  , fixities = myFixities
   }
 
 filthier :: AskState -> String -> (String, AskState)
-filthier as s = case runAM go mySetup as of
+filthier as s = case runAM go () as of
   Left e -> ("OH NO! " ++ show e, as)
   Right r -> r
  where
   go :: AM String
   go = do
-    ftab <- fixities <$> setup
-    bifoldMap (($ "") . rfold lout) id <$> traverse askRawDecl (raw ftab s)
+    fi <- getFixities
+    let (fo, b) = raw fi s
+    setFixities fo
+    bifoldMap (($ "") . rfold lout) id <$> traverse askRawDecl b

@@ -7,11 +7,6 @@ import Ask.Src.Tm
 import Ask.Src.RawAsk
 import Ask.Src.Context
 
-mySetup :: Setup
-mySetup = Setup
-  { fixities   = myFixities
-  }
-
 myFixities :: FixityTable
 myFixities = M.fromList
   [ ("&", (7, RAsso))
