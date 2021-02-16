@@ -34,6 +34,8 @@ myPreamble = B0
        Re . Impl Type . L . Expl (TE (TV 0)) . K . Expl (TE (TV 0)) . K .
        Re $ Ok)
   :< Ctor (("Prop", "'<=") :- Re . Expl Type . K . Expl Type . K . Re $ Ok)
+  :< Ctor (("Prop", "'Defd") :- Re . Expl Type . L . Expl (TE (TV 0)) . K .
+       Re $ Ok)
   :< Conn (("Prop", "False") :- Re . Re $ Ok) []
   :< Conn (("Prop", "True") :- Re . Re $ Ok)
        [ ("True", "TrueI") :- Re . Re $ Nil

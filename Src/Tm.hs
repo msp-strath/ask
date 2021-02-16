@@ -97,6 +97,7 @@ pattern Fst       = TC "Fst" []
 pattern Snd       = TC "Snd" []
 pattern Sub s t   = TC "'<=" [s, t]
 pattern Q ty l r  = TC "=" [ty, l, r]
+pattern Defd ty t = TC "'Defd" [ty, t]
 
 type Nom = [(String, Int)]   -- names for parameters are chosen by the system
 

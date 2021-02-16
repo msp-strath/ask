@@ -57,13 +57,15 @@ data Entry
   | Conn (Ctor ()) [Ctor [Subgoal]]
   | Admit Con (Bind (Tel [Subgoal]))
   | ImplicitForall
+  | BeginWhere
+  | EndWhere
   | Hyp Pr
   | Fred Appl Pr    -- Fred hopes this proposition is true somehow
   | Solve Appl Decl Syn
   | Pend News
   deriving Show
 
-data Status = New | Old | Fut deriving Show
+data Status = New | Old | Hot | Fut deriving Show
 
 data Ctor x = (Con, Con) :- Tel (Tel x) deriving Show
 infixr 0 :-
@@ -90,13 +92,16 @@ dummyLayer = Layer
 
 data Elab
   = NoElab
+  | ElabStub
   | ElabDone Syn
   | ElabTop
   | ElabGripe Gripe
   | ElabDecl RawDecl
+  | ElabSub (SubMake () Appl)
   | ElabStuk Request Elab
   | ElabChk Ty Appl
   | ElabSyn Appl
+  | ElabWhere (Bloc (SubMake () Appl))
   deriving Show
 
 data Request

@@ -1,4 +1,4 @@
------------------------------------------------------------------------------
+------------------------------------------------------------------------------
 ----------                                                          ----------
 ----------     Ask.Src.Elaborating                                  ----------
 ----------                                                          ----------
@@ -8,6 +8,7 @@
     PatternSynonyms
   , TupleSections
   , LambdaCase
+  , PatternGuards
 #-}
 
 module Ask.Src.Elaborating where
@@ -20,6 +21,7 @@ import Data.Traversable
 import Debug.Trace
 
 import Ask.Src.Bwd
+import Ask.Src.OddEven
 import Ask.Src.Lexing
 import Ask.Src.RawAsk
 import Ask.Src.Tm
@@ -43,6 +45,7 @@ elaborate = cope go (return . ElabGripe) return
       _ -> return $ ElabDecl r
     ElabChk ty a' -> elabChk ty a'
     ElabSyn a -> elabSyn a
+    ElabSub s -> elabSub s
     p -> return p
 
 
@@ -85,6 +88,9 @@ topSubMake ((_, gs) ::- Make k g m a sps src) = case k of
     push ImplicitForall
     traverse elabGiven gs
     goal <- chkElab "G" Prop g
+    push BeginWhere
+    traverse subElab sps
+    push EndWhere
     return $ ElabGripe Mardiness
 
 elabGiven :: Given Appl -> AM ()
@@ -92,6 +98,23 @@ elabGiven (Given h) = do
   e <- chkElab "H" Prop h
   hyp <- chkTE Prop e
   push (Hyp hyp)
+
+subElab :: SubMake () Appl -> AM Syn
+subElab s@(SubPGuff ls) = pushElab
+  "guff"
+  ls
+  Prop
+  (ElabGripe SyntaxError)
+subElab s@((ls, _) ::- m)  = pushElab
+  "sub"
+  (ls ++ fst (source m) ++ snd (source m))
+  Prop
+  (ElabSub s)
+
+elabSub :: SubMake () Appl -> AM Elab
+elabSub ((_, gs) ::- m) = do
+  traverse elabGiven gs
+  return $ ElabGripe Mardiness
 
 
 
@@ -212,6 +235,23 @@ invent x = AM $ \ _ lz -> go lz where
     Just (d, ez) -> Right (d, lz :< l {myPast = ez, myNext = myNext l + 2})
     Nothing -> (id *** (:< l)) <$> go lz
   yo _ B0 = Nothing
+  yo (n, i) (ez :< EndWhere) =
+    Just (xd, ez :< The tl :< The xl :< EndWhere :<
+      Fred ([(Lid, (0, 0), x)], (Lid, (0, 0), x) :$$ [])  -- FIXME!
+        (Defd (TE (TP td)) (TE (TP xd))))
+    where
+    td = Decl { nom = n ++ [(x ++ "Ty", i)]
+              , typ = Type
+              , wot = Orange
+              , who = Nothing
+              }
+    tl = dummyLayer { myDecl = td }
+    xd = Decl { nom = n ++ [(x, i + 1)]
+              , typ = TE (TP td)
+              , wot = Orange
+              , who = Just (x, Re $ TE (TP td))
+              }
+    xl = dummyLayer { myDecl = xd, myProb = ElabStub }
   yo (n, i) (ez :< ImplicitForall) =
     Just (xd, ez :< The tl :< The xl :< ImplicitForall)
     where
@@ -303,6 +343,11 @@ visitMe Orange           = True
 visitMe (Green False _)  = True
 visitMe _                = False
 
+visitStat :: Status -> Bool
+visitStat Hot = True
+visitStat New = True
+visitStat _ = False
+
 ambulando :: News -> AM ()
 ambulando nu = ambulandone >>= \case
   True -> return ()
@@ -336,18 +381,19 @@ ambulando nu = ambulandone >>= \case
           topon $ l {myFutu = es}
           let d = myDecl l'
           case runWriter (mangle (newsMang nu) d) of
-            (_ , Any False) -> if visitMe (wot d)
+            (_ , Any False) -> if visitMe (wot d) || visitStat (myStat l')
               then do
                 topon $ l'
                   { myProb = update nu (myProb l')
                   , myPast = B0
                   , myFutu = myPast l' <>> myFutu l'
+                  , myStat = Old
                   }
                 ambulando nu
               else do
                 push (The l')
                 ambulando nu
-            (d, Any True) -> if visitMe (wot d)
+            (d, Any True) -> if visitMe (wot d) || visitStat (myStat l')
               then do
                 prep . Pend $ nom d %= d
                 topon $ l'
@@ -355,6 +401,7 @@ ambulando nu = ambulandone >>= \case
                   , myProb = update nu (myProb l')
                   , myPast = B0
                   , myFutu = myPast l' <>> myFutu l'
+                  , myStat = Old
                   }
                 ambulando nu
               else do
@@ -376,6 +423,7 @@ ambulando nu = ambulandone >>= \case
               nu <- unPend
               ambulando nu
         Solve z x e -> do
+          topon $ l {myFutu = es}
           prep $ Pend nu
           aha x [] e
         _ -> do
@@ -412,7 +460,7 @@ aha x ds e = pop (const True) >>= \case
   Nothing -> do
     l <- topov
     topox Mardiness
-    prep $ The l
+    prep . The $ l { myStat = Hot }
     aha x ds e
 
 
@@ -421,7 +469,7 @@ aha x ds e = pop (const True) >>= \case
 ------------------------------------------------------------------------------
 
 myTest :: String
-myTest = "given a & b prove b & a ?"
+myTest = "given a & b prove b & a from a & b where\n  given a, b prove b & a ?"
 
 foo = runAM (ambulando mempty)
         mySetup
