@@ -47,6 +47,22 @@ chkHnf (Size, Wee s) = chkHnf (Size, s) >>= \ s -> case s of
   _       -> return $ Wee s
 chkHnf (_, t) = return t
 
+chkDnf ::
+  ( Chk  -- the type
+  , Chk  -- the term
+  ) -> AM Chk
+chkDnf (trg, TE e) = do
+  (e, src) <- dnfSyn e
+  ship e src trg
+chkDnf (Size, Wee s) = chkHnf (Size, s) >>= \ s -> case s of
+  TC _ _  -> return s
+  _       -> return $ Wee s
+chkDnf (TC d ss, TC c ts) = do
+  tel <- conTell (d, ss) c
+  (yts, _) <- runTell tel ts
+  TC c <$> traverse chkDnf yts
+chkDnf (_, t) = return t
+
 hnfSyn :: Syn -> AM (Syn, Chk)
 hnfSyn (TV _) = gripe Mardiness
 hnfSyn e@(TP d) = case wot d of
@@ -67,20 +83,28 @@ hnfSyn (e :$ s) = do
       (_, Fst) -> return (e :$ Fst, a)
       (Pair s t ::: _, Snd) -> hnfSyn $ (t ::: (b // (s ::: a)))
       (_, Snd) -> return (e :$ Snd, b // (e :$ Fst))
-      _ -> gripe Mardiness
-      
-{-
-    TC d ss -> case s of
-      TC c [TB m, tel, s'] -> let ty = m // e in case e of
-        TC c' rs ::: _
-          | c == c' -> do
-              (_, t) <- runTell tel rs
-              return (t ::: ty, ty)
-          | otherwise -> hnfSyn (e :$ s')
-        _ -> return (e :$ s, m // e)
-      _ -> gripe Mardiness
--}
+      _ -> gripe Mardiness      
     _ -> gripe Mardiness
+
+dnfSyn :: Syn -> AM (Syn, Chk)
+dnfSyn (TV _) = gripe Mardiness
+dnfSyn e@(TP d) = case wot d of
+  Green _ e  -> hnfSyn e
+  _          -> return (e, typ d)
+dnfSyn (tm ::: ty) = do
+  ty <- chkDnf (Type, ty)
+  tm <- chkDnf (ty, tm)
+  return (tm ::: ty, ty)
+dnfSyn (e :$ s) = do
+  (e, ty) <- dnfSyn e
+  case ty of
+    dom :-> ran -> return (e :$ s, ran)
+    Sigma a b -> case s of
+      Fst -> return (e :$ Fst, a)
+      Snd -> return (e :$ Snd, b // (e :$ Fst))
+      _ -> gripe Mardiness      
+    _ -> gripe Mardiness
+
 
 chkTE :: Ty -> Syn -> AM Chk
 chkTE trg e = do

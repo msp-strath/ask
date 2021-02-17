@@ -41,26 +41,26 @@ myPreamble = B0
        [ ("True", "TrueI") :- Re . Re $ Nil
        ]
   :< Conn (("Prop", "->") :- Re . Expl Prop . K . Expl Prop . K . Re $ Ok)
-       [ ("->", "ImpI") :- Expl Prop . L . Expl Prop . L . Re .
+       [ ("->", "ImpI") :- Expl Prop . L . Expl Prop . L . Re . Re .
          Cons (GIVEN (TE (TV 1)) $ PROVE (TE (TV 0))) $
          Nil
        ]
   :< Conn (("Prop", "&") :- Re . Expl Prop . K . Expl Prop . K . Re $ Ok)
-       [ ("&", "AndI") :- Expl Prop . L . Expl Prop . L . Re .
+       [ ("&", "AndI") :- Expl Prop . L . Expl Prop . L . Re . Re .
          Cons (PROVE (TE (TV 1))) .
          Cons (PROVE (TE (TV 0))) $
          Nil
        ]
   :< Conn (("Prop", "|") :- Re . Expl Prop . K . Expl Prop . K . Re $ Ok)
-       [ ("|", "OrIL") :- Expl Prop . L . Expl Prop . K . Re .
+       [ ("|", "OrIL") :- Expl Prop . L . Expl Prop . K . Re . Re .
          Cons (PROVE (TE (TV 0))) $
          Nil
-       , ("|", "OrIR") :- Expl Prop . K . Expl Prop . L . Re .
+       , ("|", "OrIR") :- Expl Prop . K . Expl Prop . L . Re . Re .
          Cons (PROVE (TE (TV 0))) $
          Nil
        ]
   :< Conn (("Prop", "Not") :- Re . Expl Prop . K . Re $ Ok)
-       [ ("Not", "NotI") :- Expl Prop . L . Re .
+       [ ("Not", "NotI") :- Expl Prop . L . Re . Re .
          Cons (GIVEN (TE (TV 0)) $ PROVE FALSE) $
          Nil
        ]

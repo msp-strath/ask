@@ -60,8 +60,7 @@ data Entry
   | BeginWhere
   | EndWhere
   | Hyp Pr
-  | Fred Appl Pr    -- Fred hopes this proposition is true somehow
-  | Solve Appl Decl Syn
+  | Solve (Maybe Appl) Decl Syn
   | Pend News
   deriving Show
 
@@ -69,6 +68,9 @@ data Status = New | Old | Hot | Fut deriving Show
 
 data Ctor x = (Con, Con) :- Tel (Tel x) deriving Show
 infixr 0 :-
+
+instance Mangle (Ctor x) where
+  mangle m (cc :- t) = (cc :-) <$> mangle m t
 
 pattern Cons x xs = TC ":" [x, xs]
 pattern Nil = TC "[]" []
@@ -98,9 +100,12 @@ data Elab
   | ElabGripe Gripe
   | ElabDecl RawDecl
   | ElabSub (SubMake () Appl)
+  | ElabPrfFrom Appl Pr Pr
+  | ElabPrfCase Pr [Tm] (Tel (Tel [Subgoal]))
   | ElabStuk Request Elab
   | ElabChk Ty Appl
   | ElabSyn Appl
+  | ElabFred (Maybe Appl) Pr
   | ElabWhere (Bloc (SubMake () Appl))
   deriving Show
 
@@ -110,8 +115,12 @@ data Request
 
 instance Mangle Elab where
   mangle m (ElabDone e) = ElabDone <$> mangle m e
+  mangle m (ElabPrfFrom a p g) = ElabPrfFrom a <$> mangle m p <*> mangle m g
+  mangle m (ElabPrfCase g ts c) =
+    ElabPrfCase <$> mangle m g <*> mangle m ts <*> mangle m c
   mangle m (ElabStuk r p) = ElabStuk <$> mangle m r <*> mangle m p
   mangle m (ElabChk ty a) = ElabChk <$> mangle m ty <*> pure a
+  mangle m (ElabFred a p) = ElabFred a <$> mangle m p
   mangle m t = pure t
 
 instance Mangle Request where
@@ -175,7 +184,7 @@ data Gripe
   | AlreadyDeclared String
   | Scope String
   | SubTypeError Appl Ty Ty
-  | UnificationError Appl Tm Tm Ty
+  | UnificationError (Maybe Appl) Tm Tm Ty
   | ByBadRule String Tm
   | ByAmbiguous String Tm
   | FromNeedsConnective Appl
@@ -269,6 +278,19 @@ problem = AM $ \ _ lz@(_ :< l) -> Right (myProb l, lz)
 push :: Entry -> AM ()
 push e = AM $ \ _ (lz :< l) -> Right ((), lz :< l {myPast = myPast l :< e})
 
+purple :: String -> Ty -> AM Decl
+purple x s = do
+  xn <- fresh x
+  let xd = Decl
+        { nom = xn
+        , typ = s
+        , wot = Purple
+        , who = Nothing
+        }
+  push . The $ dummyLayer { myDecl = xd }
+  return xd
+  
+
 prep :: Entry -> AM ()
 prep e = AM $ \ _ (lz :< l) -> Right ((), lz :< l {myFutu = e : myFutu l})
 
@@ -309,6 +331,18 @@ anyCon c = do
   cs <- lesConstructeurs
   return [(d, tel) | (d, c') :- tel <- cs, c == c']
 
+
+------------------------------------------------------------------------------
+--  Connective Lookup
+------------------------------------------------------------------------------
+
+connective :: Con -> AM (Ctor (), [Ctor [Subgoal]])
+connective r = seek cand >>= \case
+  B0 :< Conn c rs -> return (c, rs)
+  _ -> gripe FAIL
+ where
+  cand (Conn ((_, r') :- _) _) | r == r' = True
+  cand _ = False
 
 
 ------------------------------------------------------------------------------
