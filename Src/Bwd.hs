@@ -4,7 +4,8 @@ module Ask.Src.Bwd where
 
 infixl 3 :<, <><
 
-data Bwd x = B0 | Bwd x :< x deriving (Show, Eq, Ord, Functor, Foldable, Traversable)
+data Bwd x = B0 | Bwd x :< x deriving (Eq, Ord, Functor, Foldable, Traversable)
+instance Show x => Show (Bwd x) where show xz = show (xz <>> [])
 
 (<>>) :: Bwd x -> [x] -> [x]
 B0 <>> ys = ys

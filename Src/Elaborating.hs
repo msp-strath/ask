@@ -44,6 +44,9 @@ elaborate = cope go (return . ElabGripe) return
       RawSewage -> gripe SyntaxError
       _ -> return $ ElabDecl r
     ElabChk ty a' -> elabChk ty a'
+    ElabPrfBy a p -> elabPrfBy a p
+    ElabPrfByCommit as t -> elabPrfByCommit as t
+    ElabSubgoal sg -> elabSubgoal sg
     ElabPrfFrom a p goal -> elabPrfFrom a p goal
     ElabPrfCase goal ts r -> elabPrfCase goal ts r
     ElabSyn a -> elabSyn a
@@ -102,12 +105,68 @@ elabPrf goal m sps sb = do
     From p -> do
       cut <- chkElab "C" Prop p
       elabPrfFrom p cut goal
+    By r -> elabPrfBy r goal
     _ -> return $ ElabGripe Mardiness
+
+elabPrfBy :: Appl -> Pr -> AM Elab
+elabPrfBy a@(_, (_, _, h) :$$ as) goal = do
+  goal <- chkHnf (Prop, goal)
+  seek hasRule >>= \case
+    B0 :< Admit _ b -> do
+      let tel = b // (goal ::: Prop)
+      elabPrfByCommit as tel
+    ez -> case goal of
+      TC d ss -> case foldMap (bingo d) ez of
+        [tel] -> do
+          (_, tel) <- runTell tel ss
+          elabPrfByCommit as tel
+        _ -> gripe $ ByBadRule h goal
+      TE e -> return $ ElabStuk (Canon e) (ElabPrfBy a goal)
+      _ -> gripe Mardiness
+ where
+  hasRule (Admit n _) = h == n 
+  hasRule (Conn _ rs) = not $ null [() | (_, n) :- _ <- rs, h == n]
+  hasRule _ = False
+  bingo d (Conn ((_, d') :- _) rs) | d == d' =
+    [tel | (_, n) :- tel <- rs, h == n]
+  bingo d _ = []
+
+elabPrfByCommit :: [Appl] -> Tel [Subgoal] -> AM Elab
+elabPrfByCommit [] (Re sgs) = do
+  fredSubgoals sgs
+  return . ElabDone $ TRUE ::: Prop
+elabPrfByCommit as (Impl s b) = do
+  e <- hole "x" s
+  elabPrfByCommit as (b // e)
+elabPrfByCommit (a : as) (Expl s b) = do
+  t <- chkElab "x" s a
+  elabPrfByCommit as (b // (t ::: s))
+elabPrfByCommit as (Pr p t) = do
+  fred Nothing p  -- FIXME
+  elabPrfByCommit as t
+elabPrfByCommit _ _ = gripe FAIL
+
+fredSubgoals :: Chk -> AM ()
+fredSubgoals Nil = return ()
+fredSubgoals (Cons sg sgs) = do
+  pushElab "g" [] Prop (ElabSubgoal sg)
+  fredSubgoals sgs
+fredSubgoals _ = gripe Mardiness
+
+elabSubgoal :: Chk -> AM Elab
+elabSubgoal (PROVE p) = do
+  p <- chkDnf (Prop, p)
+  elabFred Nothing p
+elabSubgoal (GIVEN h g) = do
+  h <- chkDnf (Prop, h)
+  push $ Hyp h
+  elabSubgoal g
+elabSubgoal g = return $ ElabSubgoal g
 
 elabPrfFrom :: Appl -> Pr -> Pr -> AM Elab
 elabPrfFrom p cut goal = chkHnf (Prop, cut) >>= \case
   TC c ss -> do
-    fred (Just p) $ TC c ss
+    fred Nothing $ TC c ss
     (_ :- _, rs) <- cope (connective c)
       (\ _ -> gripe (FromNeedsConnective p))
       return
@@ -246,8 +305,8 @@ argsElab z (c, tel) src@(_, _ :$$ as) trg = do
     then return []
     else gripe err
   go (Impl s b) as = do
-    t <- hole z s
-    (TE t :) <$> go (b // t) as
+    e <- hole z s
+    (TE e :) <$> go (b // e) as
   go (Expl s b) as = case as of
     [] -> gripe err
     (a : as) -> do
@@ -619,7 +678,7 @@ aha x ds e = pop (const True) >>= \case
 ------------------------------------------------------------------------------
 
 myTest :: String
-myTest = "given a -> b prove p from a -> b"
+myTest = "prove p by Contradiction"
 
 foo = runAM (ambulando mempty)
         mySetup

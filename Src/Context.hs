@@ -100,6 +100,9 @@ data Elab
   | ElabGripe Gripe
   | ElabDecl RawDecl
   | ElabSub (SubMake () Appl)
+  | ElabPrfBy Appl Pr
+  | ElabPrfByCommit [Appl] (Tel [Subgoal])
+  | ElabSubgoal Subgoal
   | ElabPrfFrom Appl Pr Pr
   | ElabPrfCase Pr [Tm] (Tel (Tel [Subgoal]))
   | ElabStuk Request Elab
@@ -115,6 +118,9 @@ data Request
 
 instance Mangle Elab where
   mangle m (ElabDone e) = ElabDone <$> mangle m e
+  mangle m (ElabPrfBy a p) = ElabPrfBy a <$> mangle m p
+  mangle m (ElabPrfByCommit as t) = ElabPrfByCommit as <$> mangle m t
+  mangle m (ElabSubgoal sg) = ElabSubgoal <$> mangle m sg
   mangle m (ElabPrfFrom a p g) = ElabPrfFrom a <$> mangle m p <*> mangle m g
   mangle m (ElabPrfCase g ts c) =
     ElabPrfCase <$> mangle m g <*> mangle m ts <*> mangle m c
