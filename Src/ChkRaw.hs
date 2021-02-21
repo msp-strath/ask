@@ -2,7 +2,7 @@
 
 module Ask.Src.ChkRaw where
 
-import Data.List
+import Data.List hiding ((\\))
 import Data.Char
 import Control.Arrow ((***))
 import Data.Bifoldable
@@ -282,7 +282,7 @@ chkSubProofs ps = do
   extra :: [Subgoal] -> AM [SubMake Anno TmR]
   extra [] = return []
   extra (u : us) = cope (subgoal u obvious)
-    (\ _ -> (need u :) <$> extra us)
+    (\ _ -> (:) <$> need u <*> extra us)
     $ \ _ -> extra us
   obvious s@(TC "=" [ty, lhs, rhs])
     =   given s
@@ -294,12 +294,14 @@ chkSubProofs ps = do
     <|> given FALSE
     <|> equal Prop (s, TRUE)
             
-  need (PROVE g) =
+  need (PROVE g) = return $
     ([], []) ::- Make Prf (My g) (Stub True) (Need, False)
       ([] :-/ Stop) ([], [])
-  need (GIVEN h u) = case need u of
-    (_, gs) ::- p -> ([], Given (My h) : gs) ::- p
-    s -> s
+  need (GIVEN h u) = need u >>= \case
+    (_, gs) ::- p -> return $ ([], Given (My h) : gs) ::- p
+    s -> return s
+  need (EVERY s b) = ("x", s) |:- \ x@(TP (xn, _)) ->
+    need (b // x)
   glom :: Bloc x -> [x] -> Bloc x
   glom (g :-/ p :-\ gps) = (g :-/) . (p :-\) . glom gps
   glom end = foldr (\ x xs -> [] :-/ x :-\ xs) end
@@ -718,12 +720,11 @@ filthier as s = case runAM go () as of
 
 foo :: String
 foo = unlines
-  [ "data Bool = True | False"
-  , "not :: Bool -> Bool"
-  , "defined not b from b where"
-  , "  defined not False = True"
-  , "  defined not True = False"
-  , "prove not (not b) = b from b where"
-  , "  given b = True prove not (not True) = True tested"
-  , "  given b = False prove not (not False) = False tested"
+  [ "data N = Z | S N"
+  , "data Bool = True | False"
+  , "isS :: N -> Bool"
+  , "define isS n from n where"
+  , "  define isS Z = False"
+  , "  define isS (S x) = True"
+  , "prove n = Z | isS n = True from n"
   ]

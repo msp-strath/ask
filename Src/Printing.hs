@@ -12,6 +12,7 @@ import Ask.Src.RawAsk
 import Ask.Src.Tm
 import Ask.Src.Glueing
 import Ask.Src.Context
+import Ask.Src.Typing
 
 data Spot = AllOK | RadSpot | Infix (Int, Either Assocy Assocy) | Fun | Arg deriving (Show, Eq)
 data Wot = Rad | Inf (Int, Assocy) | App deriving (Show, Eq)
@@ -30,9 +31,13 @@ pinx :: Int -> AM String
 pinx i = return $ "???"
 
 pnom :: Nom -> AM String
-pnom x = cope (nomBKind x) (\ gr -> return (show x)) $ \case
-  User x -> return x
-  _      -> return (show x)
+pnom x = cope (nomBKind x)
+ (\ gr -> if null x then return "boo" else case last x of
+     (x, i) -> return $ x ++ show i)
+ $ \case
+   User x -> return x
+   _      -> if null x then return "boo" else case last x of
+     (x, i) -> return $ x ++ show i
 
 pppa :: Spot -> Wot -> String -> String
 pppa x y s = if paren x y then "(" ++ s ++ ")" else s where
@@ -69,12 +74,14 @@ ppTm spot (TC f@(c : s) as)
       return $ "(" ++ intercalate ", " as ++ ")"
   | f == "=" = case as of
       [ty, lhs, rhs] -> do
-        let (lhs', rhs') = case (lhs, rhs) of
-              (TE _, _) -> (lhs, rhs)
-              (_, TE _) -> (lhs, rhs)
-              _ -> (TE (lhs ::: ty), rhs)
-        lhs <- ppTm (Infix (4, Left NAsso)) lhs'
-        rhs <- ppTm (Infix (4, Right NAsso)) rhs'
+        (lhs, rhs) <- case (lhs, rhs) of
+              (TE _, _) -> return (lhs, rhs)
+              (_, TE _) -> return (lhs, rhs)
+              _ -> do
+                ty <- hnf ty
+                return (TE (lhs ::: ty), rhs)
+        lhs <- ppTm (Infix (4, Left NAsso)) lhs
+        rhs <- ppTm (Infix (4, Right NAsso)) rhs
         return $ pppa spot (Inf (4, NAsso)) (lhs ++ " = " ++ rhs)
       _ -> go "(=)"
   | otherwise = case as of
