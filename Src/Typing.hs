@@ -242,7 +242,7 @@ elabVec con tel as = do
     (\ _ -> gripe (WrongNumOfArgs con (ari tel) as))
     return
   m <- argChk [] sch
-  traverse (demand . PROVE) pos
+  traverse (fred . PROVE) pos
   return (stan m $ TC con ss, m)
  where
   specialise :: Tel -> [Appl] -> AM ([Tm], [((String, Tm), Appl)], [Tm])
@@ -640,3 +640,44 @@ conSplit t = do
     (\ _ -> return [])
     return
   refine _ _ = return []
+
+
+------------------------------------------------------------------------------
+--  Fred
+------------------------------------------------------------------------------
+
+tested :: Tm -> Tm -> Tm -> AM ()
+tested ty lhs rhs = flip (cope (equal ty (lhs, rhs))) return $ \ _ -> do
+  ty  <- hnf ty
+  lhs <- hnf lhs
+  rhs <- hnf rhs
+  case (ty, lhs, rhs) of
+    (_, TC a _, TC b _) | a /= b -> demand . PROVE $ FALSE
+    (_, TC c ss, TC d ts) | c == d -> do
+      tel <- constructor ty c
+      testSubterms tel ss ts
+    _ -> demand . PROVE $ TC "=" [ty, lhs, rhs]
+
+testSubterms :: Tel -> [Tm] -> [Tm] -> AM ()
+testSubterms tel ss ts = go [] tel ss ts where -- cargo cult
+  go :: [((String, Tm), (Tm, Tm))] -> Tel -> [Tm] -> [Tm] -> AM ()
+  go acc (Pr _) [] [] = hit [] acc
+  go acc (Ex a b) (s : ss) (t : ts) = do
+    tested a s t
+    go acc (b // (s ::: a)) ss ts
+  go acc ((x, a) :*: b) (s : ss) (t : ts) =
+    go (topInsert ((x, a), (s, t)) acc) b ss ts
+  go _ _ _ _ = gripe NotEqual
+  hit :: Matching -> [((String, Tm), (Tm, Tm))] -> AM ()
+  hit m [] = return ()
+  hit m (((x, a), (s, t)) : sch) = do
+    tested (stan m a) s t
+    hit ((x, s) : m) sch
+
+fred :: Subgoal -> AM ()
+fred (PROVE g) = hnf g >>= \case
+  TC "=" [ty, lhs, rhs] -> tested ty lhs rhs
+  _ -> demand $ PROVE g
+fred s = demand s
+
+  

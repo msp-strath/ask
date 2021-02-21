@@ -26,7 +26,7 @@ by goal a@(_, (t, _, r) :$$ ss) | elem t [Uid, Sym] = do
   case subses of
     [(tel, subs)] -> do
       (t, m) <- elabVec r tel ss
-      mapM_ demand (stan m subs)
+      mapM_ fred (stan m subs)
       return $ Our t a
     []     -> gripe $ ByBadRule r goal
     _      -> gripe $ ByAmbiguous r goal

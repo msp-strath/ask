@@ -75,6 +75,7 @@ data Method t
   | MGiven
   | Is t
   | Ind [String]
+  | Tested
   deriving (Show, Functor)
 
 data Given t
@@ -183,12 +184,12 @@ pMake = do
   pMethod mk
     =   Stub <$ the Sym "?"
     <|> From <$ the Key "from" <* spc <*> pAppl []
-    <|> case mk of
-           Prf -> By   <$ the Key "by"   <* spc <*> pAppl []
-              <|> MGiven <$ the Key "given"
-           Def -> Is <$ the Sym "=" <* spc <*> pAppl []
-              <|> Ind <$ the Key "inductively" <* spc <*>
-                    sep (txt <$> kinda Lid) (spd (the Sym ","))
+    <|> By   <$ the Key "by"   <* spc <*> pAppl []
+    <|> MGiven <$ the Key "given"
+    <|> Is <$ the Sym "=" <* spc <*> pAppl []
+    <|> Ind <$ the Key "inductively" <* spc <*>
+          sep (txt <$> kinda Lid) (spd (the Sym ","))
+    <|> Tested <$ (the Key "test" <|> the Key "tested")
   pSubs = lol "where" pSub <|> pure ([] :-/ Stop)
   pSub = ((::-) <$> ext (pGivens <* spc) <*> pMake <* spc <* eol)
       ?> ((SubPGuff . fst) <$> ext (many (eat Just) <* eol))

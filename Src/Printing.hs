@@ -67,6 +67,16 @@ ppTm spot (TC f@(c : s) as)
     if n /= length as then go f else do
       as <- traverse (ppTm AllOK) as
       return $ "(" ++ intercalate ", " as ++ ")"
+  | f == "=" = case as of
+      [ty, lhs, rhs] -> do
+        let (lhs', rhs') = case (lhs, rhs) of
+              (TE _, _) -> (lhs, rhs)
+              (_, TE _) -> (lhs, rhs)
+              _ -> (TE (lhs ::: ty), rhs)
+        lhs <- ppTm (Infix (4, Left NAsso)) lhs'
+        rhs <- ppTm (Infix (4, Right NAsso)) rhs'
+        return $ pppa spot (Inf (4, NAsso)) (lhs ++ " = " ++ rhs)
+      _ -> go "(=)"
   | otherwise = case as of
     [x, y] -> do
       (p, a) <- fixity f
@@ -115,6 +125,9 @@ ppGripe (ByBadRule r t) = do
 ppGripe (ByAmbiguous r t) = do
   t <- ppTm AllOK t
   return $ "Please report a bug: I have too many rules called " ++ r ++ " that would prove " ++ t
+ppGripe (TestNeedsEq g) = do
+  g <- ppTm AllOK g
+  return $ "I can only test equations, not " ++ g
 ppGripe (FromNeedsConnective (ls, _)) = return $
   rfold lout ls " has no main connective for 'from' to eliminate."
 ppGripe (NotGiven p) = do

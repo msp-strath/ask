@@ -27,7 +27,7 @@ import Ask.Src.Typing
 import Ask.Src.Lexing
 import Ask.Src.RawAsk
 
-trade = const id
+trade = trace
 
 
 ------------------------------------------------------------------------------
@@ -120,7 +120,7 @@ dubStep p f as = do
 inductively :: Proglem -> [String] -> AM Proglem
 inductively p@(Proglem de f u li ls la ty) xs = do
   True <- trade ("inductively " ++ show p) $ return True
-  xs <- traverse chkIsData xs
+  xs <- traverse (chkIsData de) xs
   non <- fresh "" -- make a nonce
   let nonp = (non, Hide Zone)
   let nont = TE (TP nonp)
@@ -164,18 +164,25 @@ inductively p@(Proglem de f u li ls la ty) xs = do
     (rfold e4p sb ls)
     (rfold e4p sb la)
     (rfold e4p sb ty)
- where
-  chkIsData :: String -> AM Nom
-  chkIsData x = case foldMap spot de of
-    [(xn, Hide ty)] -> do
-      ty@(TC d _) <- hnf ty
-      ga <- gamma
-      guard . getAny $ foldMap (Any . isda d) ga
-      return xn
-    _ -> gripe $ Scope x
-    where
-      spot (Bind xp (User y)) | y == x = [xp]
-      spot _ = []
-      isda d (Data e _) = d == e
-      isda _ _ = False
-      
+
+chkIsData :: Context -> String -> AM Nom
+chkIsData de x = case foldMap spot de of
+  [(xn, Hide ty)] -> do
+    ty@(TC d _) <- hnf ty
+    ga <- gamma
+    guard . getAny $ foldMap (Any . isda d) ga
+    return xn
+  _ -> gripe $ Scope x
+  where
+    spot (Bind xp (User y)) | y == x = [xp]
+    spot _ = []
+    isda d (Data e _) = d == e
+    isda _ _ = False
+
+
+indPrf :: Tm -> [String] -> AM ()
+indPrf g xs = do
+  ga <- gamma
+  xs <- traverse (chkIsData ga) xs
+  True <- trade ("INDPRF " ++ show ga) $ return True
+  return ()

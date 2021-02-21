@@ -157,13 +157,25 @@ chkProof g m ps src = cope go junk return where
       m <- case m of
         Stub -> pure Stub
         By r -> By <$> (gt `by` r)
-        From h@(_, (t, _, _) :$$ _) | elem t [Uid, Sym] -> do
-          ht <- elabTm Prop h
-          demand (PROVE ht)
-          fromSubs gt ht
-          return (From (Our ht h))
+        From h@(_, (t, _, _) :$$ _)
+          | elem t [Uid, Sym] -> do
+            ht <- elabTm Prop h
+            demand (PROVE ht)
+            fromSubs gt ht
+            return (From (Our ht h))
         From h -> gripe $ FromNeedsConnective h
-        MGiven -> MGiven <$ given gt
+        Ind xs -> do
+          True <- tracy "HELLO" $ return True
+          indPrf gt xs
+          return $ Ind xs
+        MGiven -> hnf gt >>= \case
+          TC "=" [ty, lhs, rhs] ->
+            MGiven <$ (given (TC "=" [ty, lhs, rhs])
+                       <|> given (TC "=" [ty, rhs, lhs]))
+          _ -> MGiven <$ given gt
+        Tested -> hnf gt >>= \case
+          TC "=" [ty, lhs, rhs] -> Tested <$ tested ty lhs rhs
+          _ -> gripe $ TestNeedsEq gt
       ns <- chkSubProofs ps
       let proven = case m of {Stub -> False; _ -> all happy ns}
       return $ Make Prf g m (Keep, proven) ns src
@@ -173,6 +185,7 @@ chkProof g m ps src = cope go junk return where
 happy :: SubMake Anno TmR -> Bool
 happy (_ ::- Make _ _ _ (_, b) _ _) = b
 happy _ = True
+
 
 -- checking subproofs amounts to validating them,
 -- then checking which subgoals are covered,
@@ -263,6 +276,11 @@ chkSubProofs ps = do
   extra (u : us) = cope (subgoal u obvious)
     (\ _ -> (need u :) <$> extra us)
     $ \ _ -> extra us
+  obvious s@(TC "=" [ty, lhs, rhs])
+    =   given s
+    <|> given (TC "=" [ty, rhs, lhs])
+    <|> given FALSE
+    <|> equal Prop (s, TRUE)    
   obvious s
     =   given s
     <|> given FALSE
@@ -321,11 +339,11 @@ fromSubs
   -> AM ()
 fromSubs g f = map snd {- ignorant -} <$> invert f >>= \case
   [[s]] -> flop s g
-  rs -> mapM_ (demand . foldr (GIVEN . propify) (PROVE g)) rs
+  rs -> mapM_ (fred . foldr (GIVEN . propify) (PROVE g)) rs
  where
-  flop (PROVE p)   g = demand . GIVEN p $ PROVE g
+  flop (PROVE p)   g = fred . GIVEN p $ PROVE g
   flop (GIVEN h s) g = do
-    demand $ PROVE h
+    fred $ PROVE h
     flop s g
   propify (GIVEN s t) = s :-> propify t
   propify (PROVE p)   = p
@@ -685,3 +703,14 @@ filthier as s = case runAM go () as of
     let (fo, b) = raw fi s
     setFixities fo
     bifoldMap (($ "") . rfold lout) id <$> traverse askRawDecl b
+
+foo :: String
+foo = unlines
+  [ "data N = Z | S N"
+  , "(+) :: N -> N -> N"
+  , "define x + y inductively x where"
+  , "  define x + y from x where"
+  , "    define Z + y = y"
+  , "    define S x + y = S (x + y)"
+  , "prove x + Z = x inductively x"
+  ]
