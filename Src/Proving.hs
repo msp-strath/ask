@@ -55,7 +55,7 @@ invert hyp = fold <$> (gamma >>= traverse try )
 given :: Tm -> AM ()
 given goal = gamma >>= go where
   go B0 = gripe $ NotGiven goal
-  go (ga :< Hyp hyp) = cope (equal (TC "Prop" []) (hyp, goal))
+  go (ga :< Hyp hyp) = cope (unify (TC "Prop" []) hyp goal)
     (\ gr -> go ga) return
   go (ga :< _) = go ga
 

@@ -228,14 +228,18 @@ chkSubProofs ps = do
     (\ _ -> ((g :-/) . ((b, p) :-\ )) <$> cover1 t qs)
     $ \ _ -> return $ (g :-/ (True, p) :-\ qs)
   covers :: Subgoal -> SubMake Anno TmR -> AM ()
-  covers t ((_, hs) ::- Make Prf g m (Keep, _) _ _) = subgoal t $ \ t -> do
-    g <- mayhem $ my g
-    traverse ensure hs
-    True <- tracy ("COVERS " ++ show (g, t)) $ return True
-    equal Prop (g, t)
+  covers sg sp = do
+    True <- tracy ("COVERS: " ++ show sg ++ " ? " ++ show sp) $ return True
+    go sg sp
    where
+    go t ((_, hs) ::- Make Prf g m (Keep, _) _ _) = subgoal t $ \ t -> do
+      g <- mayhem $ my g
+      traverse smegUp (g : [h | Given x <- hs, Just h <- [my x]])
+      traverse ensure hs
+      True <- tracy ("COVERS " ++ show (g, t)) $ return True
+      unify Prop g t
+    go _ _ = gripe FAIL
     ensure (Given h) = mayhem (my h) >>= given
-  covers t _ = gripe FAIL
   squish :: (Bool, SubMake Anno TmR) -> SubMake Anno TmR
   squish (False, gs ::- Make k g m (Keep, _) ss src) =
     gs ::- Make k g m (Junk Surplus, True) ss src
@@ -306,6 +310,26 @@ chkSubProofs ps = do
   glom (g :-/ p :-\ gps) = (g :-/) . (p :-\) . glom gps
   glom end = foldr (\ x xs -> [] :-/ x :-\ xs) end
 
+smegUp :: Tm -> AM ()
+smegUp (TE e) = smegDown e
+smegUp (TC _ hs) = () <$ traverse smegUp hs
+smegUp (TB (L t)) = smegUp t
+smegUp (TB (K t)) = smegUp t
+smegUp _ = return ()
+
+smegDown :: Syn -> AM ()
+smegDown (TP xp@(x, Hide ty)) =
+  cope (nomBKind x)
+    (\ _ -> do
+      push $ Bind xp Hole
+      True <- tracy ("GUESS: " ++ show x) $ return True
+      return ())
+    (\ _ -> return ())
+smegDown (tm ::: ty) = smegUp tm >> smegUp ty
+smegDown (f :$ s) = smegDown f >> smegUp s
+smegDown (TF _ as bs) = traverse smegUp as >> traverse smegUp bs >> return ()
+smegDown _ = return ()
+
 subgoal :: Subgoal -> (Tm -> AM x) -> AM x
 subgoal (GIVEN h g) k = h |- subgoal g k
 subgoal (PROVE g) k = k g
@@ -317,11 +341,11 @@ validSubProof
   -> AM (Bool, SubMake Anno TmR)
 validSubProof sgs sps = do
   push ImplicitQuantifier -- cheeky!
-  x <- go sps
-  pop $ \case
-    ImplicitQuantifier -> True
-    _ -> False
-  return x
+  (b, m)  <- go sps
+  ga <- gamma
+  let (ga', ds) = jank ga
+  setGamma ga'
+  return (b, splott ds m)
  where
   go ((srg, Given h : gs) ::- p@(Make k sg sm () sps src)) =
     cope (elabTm Prop h)
@@ -352,6 +376,17 @@ validSubProof sgs sps = do
         (\ gr -> expected f as ga <* push z)
         (<$ setGamma ga)
   go (SubPGuff ls) = return $ (False, SubPGuff ls)
+  jank (ga :< ImplicitQuantifier) = (ga, [])
+  jank (ga :< Bind (x, Hide ty) k) = case k of
+    Defn t -> let (ga', ds) = jank ga in
+      (ga', (x, rfold e4p ds (t ::: ty)) : ds)
+    _ -> jank ga
+  jank (ga :< z) = (ga' :< z, ds) where (ga', ds) = jank ga
+  jank ga = (ga, [])
+  splott ds ((ls, hs) ::- Make mk g me a sps src) =
+    ((ls, [Given (rfold e4p ds h) | Given h <- hs]) ::-
+     Make mk (rfold e4p ds g) me a sps src)
+  splott _ s = s
 
 fromSubs
   :: Tm      -- goal
