@@ -209,31 +209,32 @@ pop test = do
 what's :: String -> AM (Either (Nom, Sch) (Syn, Tm))
 what's x = do
   ga <- gamma
-  (e, mga) <- go ga
-  case mga of
-    Nothing -> return ()
-    Just ga -> setGamma ga
-  return e
+  cope (go ga)
+    (\ _ -> do
+      (e, ga) <- qu ga
+      setGamma ga
+      return e)
+    $ return
  where
-  go :: Context -> AM (Either (Nom, Sch) (Syn, Tm), Maybe Context)
+  go :: Context -> AM (Either (Nom, Sch) (Syn, Tm))
   go B0 = gripe (Scope x)
   go (_ :< Bind p@(_, Hide ty) (User y)) | x == y =
-    return (Right (TP p, ty), Nothing)
-  go ga@(_ :< ImplicitQuantifier) = case decl ga of
-    Just nsch -> return (Left nsch, Nothing)
-    Nothing -> do
-      xTp <- (, Hide Type) <$> fresh "Ty"
-      let xTy = TE (TP xTp)
-      xp  <- (, Hide xTy)  <$> fresh x
-      return (Right (TP xp, xTy), Just (ga :< Bind xTp Hole :< Bind xp (User x)))
+    return $ Right (TP p, ty)
   go (ga :< RecShadow y) | x == y = gripe (BadRec x)
-  go (ga :< Declare y yn sch) | x == y = return (Left (yn, sch), Nothing)
-  go (ga :< z) = do
-    (e, mga) <- go ga
-    return (e, (:< z) <$> mga)
+  go (ga :< Declare y yn sch) | x == y = return $ Left (yn, sch)
+  go (ga :< z) = go ga
   decl (ga :< Declare y yn sch) | x == y = Just (yn, sch)
   decl (ga :< _) = decl ga
   decl B0 = Nothing
+  qu ga@(_ :< ImplicitQuantifier) = do
+    xTp <- (, Hide Type) <$> fresh "Ty"
+    let xTy = TE (TP xTp)
+    xp  <- (, Hide xTy)  <$> fresh x
+    return (Right (TP xp, xTy), ga :< Bind xTp Hole :< Bind xp (User x))
+  qu B0 = gripe (Scope x)
+  qu (ga :< z) = do
+    (e, ga) <- qu ga
+    return (e, ga :< z)
 
 -- finding one of ours
 nomBKind :: Nom -> AM BKind

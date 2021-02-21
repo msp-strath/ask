@@ -205,7 +205,7 @@ chkSubProofs
   -> AM (Bloc (SubMake Anno TmR))   -- reconstruction
 chkSubProofs ps = do
   ss <- demands
-  (qs, us) <- traverse validSubProof ps >>= cover ss
+  (qs, us) <- traverse (validSubProof ss) ps >>= cover ss
   True <- tracy ("COVER " ++ show (qs, us)) $ return True
   eps <- gamma >>= sprog
   vs <- extra us
@@ -312,37 +312,46 @@ subgoal (PROVE g) k = k g
 subgoal (EVERY t b) k = ("", t) |:- \ e -> subgoal (b // e) k
 
 validSubProof
-  :: SubMake () Appl
+  :: [Subgoal] -- sneakily peek at what we want
+  -> SubMake () Appl
   -> AM (Bool, SubMake Anno TmR)
-validSubProof ((srg, Given h : gs) ::- p@(Make k sg sm () sps src)) =
-  cope (elabTm Prop h)
-    (\ gr -> return $ (False, (srg, map (fmap Your) (Given h : gs)) ::-
-      Make k (Your sg) (fmap Your sm) (Junk gr, True)
-        (fmap subPassive sps) src))
-    $ \ ht -> do
-      (b, (srg, gs) ::- p) <- ht |- validSubProof ((srg, gs) ::- p)
-      return $ (b, (srg, Given (Our ht h) : gs) ::- p)
-validSubProof ((srg, []) ::- Make Prf sg sm () sps src) =
-  cope (elabTmR Prop sg)
-    (\ gr -> return $ (False, (srg, []) ::- Make Prf (Your sg) (fmap Your sm)
-      (Junk gr, True) (fmap subPassive sps) src))
-    $ \ sg -> (False, ) <$> (((srg, []) ::-) <$> chkProof sg sm sps src)
-validSubProof ((srg, []) ::- Make Def sg@(_, (_, _, f) :$$ as) sm () sps src) = do
-  p <- gamma >>= expected f as
-  True <- tracy ("FOUND " ++ show p) $ return True
-  True <- gamma >>= \ ga -> tracy (show ga) $ return True
-  (True,) <$> (((srg, []) ::-) <$> chkProg p sg sm sps src)
+validSubProof sgs sps = do
+  push ImplicitQuantifier -- cheeky!
+  x <- go sps
+  pop $ \case
+    ImplicitQuantifier -> True
+    _ -> False
+  return x
  where
-  expected f as B0 = gripe Surplus
-  expected f as (ga :< z) = do
-    True <- tracy ("EXP " ++ show f ++ show as ++ show z) $ return True
-    cope (do
-      Expect p <- return z
-      dubStep p f as
-      )
-      (\ gr -> expected f as ga <* push z)
-      (<$ setGamma ga)
-validSubProof (SubPGuff ls) = return $ (False, SubPGuff ls)
+  go ((srg, Given h : gs) ::- p@(Make k sg sm () sps src)) =
+    cope (elabTm Prop h)
+      (\ gr -> return $ (False, (srg, map (fmap Your) (Given h : gs)) ::-
+        Make k (Your sg) (fmap Your sm) (Junk gr, True)
+          (fmap subPassive sps) src))
+      $ \ ht -> do
+        (b, (srg, gs) ::- p) <- ht |- go ((srg, gs) ::- p)
+        return $ (b, (srg, Given (Our ht h) : gs) ::- p)
+  go ((srg, []) ::- Make Prf sg sm () sps src) =
+    cope (elabTmR Prop sg)
+      (\ gr -> return $ (False, (srg, []) ::- Make Prf (Your sg) (fmap Your sm)
+        (Junk gr, True) (fmap subPassive sps) src))
+      $ \ sg -> (False, ) <$> (((srg, []) ::-) <$> chkProof sg sm sps src)
+  go ((srg, []) ::- Make Def sg@(_, (_, _, f) :$$ as) sm () sps src) = do
+    p <- gamma >>= expected f as
+    True <- tracy ("FOUND " ++ show p) $ return True
+    True <- gamma >>= \ ga -> tracy (show ga) $ return True
+    (True,) <$> (((srg, []) ::-) <$> chkProg p sg sm sps src)
+   where
+    expected f as B0 = gripe Surplus
+    expected f as (ga :< z) = do
+      True <- tracy ("EXP " ++ show f ++ show as ++ show z) $ return True
+      cope (do
+        Expect p <- return z
+        dubStep p f as
+        )
+        (\ gr -> expected f as ga <* push z)
+        (<$ setGamma ga)
+  go (SubPGuff ls) = return $ (False, SubPGuff ls)
 
 fromSubs
   :: Tm      -- goal
@@ -726,5 +735,7 @@ foo = unlines
   , "define isS n from n where"
   , "  define isS Z = False"
   , "  define isS (S x) = True"
-  , "prove n = Z | isS n = True from n"
+  , "prove n = Z | isS n = True from n where"
+  , "  given n = Z prove (Z :: N) = Z | isS Z = True ?"
+  , "  given n = S x prove (S x :: N) = Z | isS (S x) = True ?"
   ]
