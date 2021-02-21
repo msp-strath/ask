@@ -69,13 +69,13 @@ done m False = show m
 done m True  = show m ++ case m of {Prf -> "n"; Def -> "d"}
 
 data Method t
-  = Stub
+  = Stub Bool -- is there a "?" ?
   | By t
   | From t
   | MGiven
   | Is t
   | Ind [String]
-  | Tested
+  | Tested Bool -- ed?
   deriving (Show, Functor)
 
 data Given t
@@ -182,14 +182,14 @@ pMake = do
   pMaking = Prf <$ (the Key "prove" <|> the Key "proven")
         <|> Def <$ (the Key "define" <|> the Key "defined")
   pMethod mk
-    =   Stub <$ the Sym "?"
+    =   Stub <$> ((True <$ the Sym "?") ?> (False <$ pure ()))
     <|> From <$ the Key "from" <* spc <*> pAppl []
     <|> By   <$ the Key "by"   <* spc <*> pAppl []
     <|> MGiven <$ the Key "given"
-    <|> Is <$ the Sym "=" <* spc <*> pAppl []
+    <|> Is <$ guard (mk == Def) <* the Sym "=" <* spc <*> pAppl []
     <|> Ind <$ the Key "inductively" <* spc <*>
           sep (txt <$> kinda Lid) (spd (the Sym ","))
-    <|> Tested <$ (the Key "test" <|> the Key "tested")
+    <|> Tested <$> (False <$ the Key "test" <|> True <$ the Key "tested")
   pSubs = lol "where" pSub <|> pure ([] :-/ Stop)
   pSub = ((::-) <$> ext (pGivens <* spc) <*> pMake <* spc <* eol)
       ?> ((SubPGuff . fst) <$> ext (many (eat Just) <* eol))

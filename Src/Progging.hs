@@ -27,7 +27,7 @@ import Ask.Src.Typing
 import Ask.Src.Lexing
 import Ask.Src.RawAsk
 
-trade = trace
+trade = const id
 
 
 ------------------------------------------------------------------------------

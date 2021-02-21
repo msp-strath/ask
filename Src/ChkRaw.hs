@@ -67,7 +67,7 @@ chkProg
 chkProg p gr mr ps src@(h,b) = do
   push ExpectBlocker
   m <- case mr of
-    Stub -> pure Stub
+    Stub b -> pure $ Stub b
     Is a -> do
       doorStop
       True <- tracy ("IS " ++ show a ++ " ?") $ return True
@@ -95,7 +95,7 @@ chkProg p gr mr ps src@(h,b) = do
     _ -> gripe FAIL
   ns <- chkSubProofs ps
   pop $ \case {ExpectBlocker -> True; _ -> False}
-  let defined = case m of {Stub -> False; _ -> all happy ns}
+  let defined = case m of {Stub _ -> False; _ -> all happy ns}
   return $ Make Def (Your gr) m (Keep, defined) ns src
  where
   expect :: Nom -> Tm -> Proglem -> (Con, Tel) -> AM ()
@@ -155,7 +155,7 @@ chkProof g m ps src = cope go junk return where
   go = case my g of
     Just gt -> do
       m <- case m of
-        Stub -> pure Stub
+        Stub b -> pure $ Stub b
         By r -> By <$> (gt `by` r)
         From h@(_, (t, _, _) :$$ _)
           | elem t [Uid, Sym] -> do
@@ -163,6 +163,14 @@ chkProof g m ps src = cope go junk return where
             demand (PROVE ht)
             fromSubs gt ht
             return (From (Our ht h))
+        From h@(_, (Lid, _, x) :$$ []) -> what's x >>= \case
+          Right (e@(TP xp), ty) -> hnf ty >>= \case
+            TC d ss -> foldMap (\case {Data c cs | c == d -> [cs]; _ -> []})
+              <$> gamma >>= \case
+                [cs] -> From (Our (TE e) h) <$
+                  traverse (splitProof xp (d, ss) gt) cs
+                _ -> gripe $ FAIL -- FIXME!
+          _ -> gripe $ FromNeedsConnective h
         From h -> gripe $ FromNeedsConnective h
         Ind xs -> do
           True <- tracy "HELLO" $ return True
@@ -173,11 +181,11 @@ chkProof g m ps src = cope go junk return where
             MGiven <$ (given (TC "=" [ty, lhs, rhs])
                        <|> given (TC "=" [ty, rhs, lhs]))
           _ -> MGiven <$ given gt
-        Tested -> hnf gt >>= \case
-          TC "=" [ty, lhs, rhs] -> Tested <$ tested ty lhs rhs
+        Tested b -> hnf gt >>= \case
+          TC "=" [ty, lhs, rhs] -> Tested b <$ tested ty lhs rhs
           _ -> gripe $ TestNeedsEq gt
       ns <- chkSubProofs ps
-      let proven = case m of {Stub -> False; _ -> all happy ns}
+      let proven = case m of {Stub _ -> False; _ -> all happy ns}
       return $ Make Prf g m (Keep, proven) ns src
     Nothing -> return $ Make Prf g (fmap Your m) (Junk Mardiness, True)
       (fmap subPassive ps) src
@@ -246,7 +254,7 @@ chkSubProofs ps = do
     blep :: Proglem -> SubMake Anno TmR
     blep p = ([], []) ::- -- bad hack on its way!
       Make Def (My (TC (uName p) (fst (frob [] (map fst (leftSatu p ++ leftAppl p))))))
-        Stub (Need, False) ([] :-/ Stop) ([], [])
+        (Stub True) (Need, False) ([] :-/ Stop) ([], [])
       where
         frob zs [] = ([], zs)
         frob zs (TC c ts : us) = case frob zs ts of
@@ -287,7 +295,7 @@ chkSubProofs ps = do
     <|> equal Prop (s, TRUE)
             
   need (PROVE g) =
-    ([], []) ::- Make Prf (My g) Stub (Need, False)
+    ([], []) ::- Make Prf (My g) (Stub True) (Need, False)
       ([] :-/ Stop) ([], [])
   need (GIVEN h u) = case need u of
     (_, gs) ::- p -> ([], Given (My h) : gs) ::- p
@@ -299,6 +307,7 @@ chkSubProofs ps = do
 subgoal :: Subgoal -> (Tm -> AM x) -> AM x
 subgoal (GIVEN h g) k = h |- subgoal g k
 subgoal (PROVE g) k = k g
+subgoal (EVERY t b) k = ("", t) |:- \ e -> subgoal (b // e) k
 
 validSubProof
   :: SubMake () Appl
@@ -352,7 +361,7 @@ pout :: LayKind -> Make Anno TmR -> AM (Odd String [LexL])
 pout k p@(Make mk g m (s, n) ps (h, b)) = let k' = scavenge b in case s of
   Keep -> do
     blk <- psout k' ps
-    return $ (rfold lout (h `tense` n) . whereFormat b ps
+    return $ (rfold lout (h `tense` n) . jank m . whereFormat b ps
              $ format k' blk)
              :-/ Stop
   Need -> do
@@ -368,6 +377,9 @@ pout k p@(Make mk g m (s, n) ps (h, b)) = let k' = scavenge b in case s of
       (rfold lout h . rfold lout b $ "") :-/ [(Ret, (0,0), "\n")] :-\
       "-}" :-/ Stop
  where
+   jank (Stub False) = (" ?" ++)
+   jank (Tested False) = ("ed" ++)
+   jank _ = id
    kws = [done mk b | b <- [False, True]]
    ((Key, p, s) : ls) `tense` n | elem s kws =
      (Key, p, done mk n) : ls
@@ -706,11 +718,10 @@ filthier as s = case runAM go () as of
 
 foo :: String
 foo = unlines
-  [ "data N = Z | S N"
-  , "(+) :: N -> N -> N"
-  , "define x + y inductively x where"
-  , "  define x + y from x where"
-  , "    define Z + y = y"
-  , "    define S x + y = S (x + y)"
-  , "prove x + Z = x inductively x"
+  [ "data Bool = True | False"
+  , "not :: Bool -> Bool"
+  , "define not b from b where"
+  , "  define not True = False"
+  , "  define not False = True"
+  , "prove not (not b) = b"
   ]

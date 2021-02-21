@@ -12,6 +12,7 @@ module Ask.Src.Proving where
 
 import Data.Foldable
 
+import Ask.Src.Hide
 import Ask.Src.Bwd
 import Ask.Src.Lexing
 import Ask.Src.RawAsk
@@ -66,3 +67,30 @@ h |- p = do
     Hyp _ -> True
     _ -> False
   return x
+
+splitProof
+  :: (Nom, Hide Tm) -- thing to split
+  -> (Con, [Tm])
+  -> Tm  -- goal
+  -> CxE -- constructor (we hope)
+  -> AM () -- generate relevant demands
+splitProof xp@(xn, _) (d, ss) goal ((d', ps) ::> (c, _)) | d == d' =
+  cope (constructor (TC d ss) c) (\ _ -> return ()) $ \ tel ->
+    quan B0 tel >>= fred
+ where
+  quan :: Bwd Tm -> Tel -> AM Subgoal
+  quan sz (Ex s b) =
+    ("", s) |:- \ e@(TP (yn, _)) ->
+      (EVERY s . (yn \\)) <$> quan (sz :< TE e) (b // e)
+  quan sz ((y, s) :*: tel) =
+    (y, s) |:- \ e@(TP (yn, _)) ->
+      (EVERY s . (yn \\)) <$> quan (sz :< TE e) (stan [(y, TE e)] tel)
+  quan sz (Pr hs) = let ty = TC d ss; tm = TC c (sz <>> []) in
+    return $ foldr GIVEN
+      (GIVEN (TC "=" [ty, TE (TP xp), tm]) $
+         PROVE ((xn \\ goal) // (tm ::: ty)))
+      hs
+    
+  
+splitProof _ _ _ _ = return ()
+  
