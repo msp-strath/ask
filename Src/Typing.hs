@@ -236,12 +236,18 @@ elabTm ty (_, (t, _, y) :$$ ras) = do
   declared (Declare f _ _) = f == y
   declared _ = False
 
+shitSort :: [((String, Tm), Appl)] -> [((String, Tm), Appl)]
+shitSort [] = []
+shitSort (a@((_, _), (_, (Lid, _, _) :$$ _)) : as) = a : shitSort as
+shitSort (a@((_, _), (_, (_, _, "::") :$$ _)) : as) = a : shitSort as
+shitSort (a : as) = topInsert a (shitSort as)
+
 elabVec :: String -> Tel -> [Appl] -> AM (Tm, Matching)
 elabVec con tel as = do
   (ss, sch, pos) <- cope (specialise tel as)
     (\ _ -> gripe (WrongNumOfArgs con (ari tel) as))
     return
-  m <- argChk [] sch
+  m <- argChk [] (shitSort sch)
   traverse (fred . PROVE) pos
   return (stan m $ TC con ss, m)
  where

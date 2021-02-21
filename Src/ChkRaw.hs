@@ -720,8 +720,10 @@ foo :: String
 foo = unlines
   [ "data Bool = True | False"
   , "not :: Bool -> Bool"
-  , "define not b from b where"
-  , "  define not True = False"
-  , "  define not False = True"
-  , "prove not (not b) = b from b"
+  , "defined not b from b where"
+  , "  defined not False = True"
+  , "  defined not True = False"
+  , "prove not (not b) = b from b where"
+  , "  given b = True prove not (not True) = True tested"
+  , "  given b = False prove not (not False) = False tested"
   ]
