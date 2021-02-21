@@ -287,8 +287,8 @@ chkSubProofs ps = do
   obvious s@(TC "=" [ty, lhs, rhs])
     =   given s
     <|> given (TC "=" [ty, rhs, lhs])
+    <|> equal ty (lhs, rhs)
     <|> given FALSE
-    <|> equal Prop (s, TRUE)    
   obvious s
     =   given s
     <|> given FALSE
@@ -723,5 +723,5 @@ foo = unlines
   , "define not b from b where"
   , "  define not True = False"
   , "  define not False = True"
-  , "prove not (not b) = b"
+  , "prove not (not b) = b from b"
   ]
