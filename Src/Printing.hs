@@ -163,7 +163,9 @@ ppGripe (BadFName f) = return $ case f of
       " but function names should begin in lowercase. (Did you mean data ... = "
       ++ f ++ " ...?)"
   _ -> "I'm afraid that " ++ f ++ " is an unsuitable name for a function."
-    
+
 ppGripe FAIL = return $
   "It went wrong but I've forgotten how. Please ask a human for help."
+ppGripe (NonCanonicalType ty con) =
+  return $ show con ++ " is a constructor but I am not sure it should be there."
 ppGripe g = return $ show g
