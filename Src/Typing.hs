@@ -10,7 +10,7 @@
   , PatternSynonyms
   , TypeSynonymInstances
   , FlexibleInstances #-}
-  
+
 module Ask.Src.Typing where
 
 --import Data.List
@@ -393,7 +393,7 @@ unify ty a b = do  -- pay more attention to types
     (TC "$" [a, TE (TP (z, _)), i], TC "$" [b, TE (TP (y, _)), j])
       | z == y && i == j -> unify Type a b
     (TC f as, TC g bs) -> do
-      guard $ f == g
+      guardErr (f == g) (Unification f g)
       tel <- constructor ty f
       unifies tel as bs
     (TE (TP xp), t) -> make xp t ty
@@ -465,7 +465,7 @@ make xp@(x, Hide ty) t  got = do
       got <- case t of
         TE e -> eqSyn e e
         _ -> return got
-      subtype got ty 
+      subtype got ty
       ga <- gamma
       ga <- go ga []
       True <- track "MADE" $ return True
@@ -570,7 +570,7 @@ telify vs lox = go [] lox where
     User x -> e4p (xp, TM x [] ::: ty) <$> go ((x, (xp, ty)) : ps) lox
   go ps ((_ ::> _) : lox) = go ps lox
   go _ _ = gripe FAIL
-       
+
 schemify :: [String]  -- the explicit parameter order
          -> [CxE]     -- the local context (as returned by doorStep)
          -> Tm        -- the return type
@@ -594,8 +594,8 @@ schemify vs lox rt = go [] lox where
         Al ty <$> ((xp \\) <$> go ps lox)
   go ps ((_ ::> _) : lox) = go ps lox
   go _ _ = gripe FAIL
-       
-    
+
+
 ------------------------------------------------------------------------------
 --  Binding a Parameter List
 ------------------------------------------------------------------------------
