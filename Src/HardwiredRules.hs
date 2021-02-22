@@ -9,8 +9,9 @@ import Ask.Src.Context
 
 myFixities :: FixityTable
 myFixities = M.fromList
-  [ ("&", (7, RAsso))
-  , ("|", (6, RAsso))
+  [ ("=", (4, NAsso))
+  , ("&", (3, RAsso))
+  , ("|", (2, RAsso))
   , ("->", (1, RAsso))
   ]
 

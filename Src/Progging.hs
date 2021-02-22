@@ -15,6 +15,7 @@ import Data.List hiding ((\\))
 import Control.Monad
 import Data.Monoid
 import Data.Traversable
+import Control.Arrow ((***))
 
 import Debug.Trace
 
@@ -65,7 +66,7 @@ dubStep p f as = do
   push ImplicitQuantifier
   (e, ty) <- elabSyn f as
   lox <- doorStep
-  z@(f, is, ss, as) <- mayhem $ fnarg e []
+  z@(f, _, is, ss, as) <- mayhem $ fnarg e []
   True <- trade ("FNARG " ++ show z) $ return True
   guard $ f == fNom p
   p <- tro lox as (leftAppl p) p
@@ -120,7 +121,7 @@ dubStep p f as = do
 inductively :: Proglem -> [String] -> AM Proglem
 inductively p@(Proglem de f u li ls la ty) xs = do
   True <- trade ("inductively " ++ show p) $ return True
-  xs <- traverse chkIsData xs
+  xs <- traverse (chkIsData de) xs
   non <- fresh "" -- make a nonce
   let nonp = (non, Hide Zone)
   let nont = TE (TP nonp)
@@ -164,18 +165,80 @@ inductively p@(Proglem de f u li ls la ty) xs = do
     (rfold e4p sb ls)
     (rfold e4p sb la)
     (rfold e4p sb ty)
+
+isDataType :: Con -> AM ()
+isDataType d = do
+  ga <- gamma
+  guard . getAny $ foldMap (Any . isda d) ga
  where
-  chkIsData :: String -> AM Nom
-  chkIsData x = case foldMap spot de of
-    [(xn, Hide ty)] -> do
-      ty@(TC d _) <- hnf ty
-      ga <- gamma
-      guard . getAny $ foldMap (Any . isda d) ga
-      return xn
-    _ -> gripe $ Scope x
-    where
-      spot (Bind xp (User y)) | y == x = [xp]
-      spot _ = []
-      isda d (Data e _) = d == e
-      isda _ _ = False
-      
+  isda d (Data e _) = d == e
+  isda _ _ = False
+
+chkIsData :: Context -> String -> AM Nom
+chkIsData de x = case foldMap spot de of
+  [(xn, Hide ty)] -> do
+    ty@(TC d _) <- hnf ty
+    isDataType d
+    return xn
+  _ -> gripe $ Scope x
+  where
+    spot (Bind xp (User y)) | y == x = [xp]
+    spot _ = []
+
+
+indPrf :: Tm -> [String] -> AM ()
+indPrf g xs = do
+  non <- fresh "" -- make a nonce
+  let nonp = (non, Hide Zone)
+  let nont = TE (TP nonp)
+  ((ws, wg), (bs, bg)) <- qpr xs nont (([], g), ([], g))
+  push $ Bind nonp (User "")
+  traverse (\ (xp, u) -> push $ Bind xp (User u)) bs
+  push $ Hyp wg
+  demand $ PROVE bg
+  ga <- gamma
+  True <- trade ("INDPRF: " ++ show ga) $ return True
+  return ()
+
+qpr :: [String] -- inductively what?
+    -> Tm       -- size zone
+    -> ( ([(Nom, (Nom, Hide Tm))], Tm)
+       , ([((Nom, Hide Tm), String)], Tm)
+       )  -- wees, bigs
+    -> AM  ( ([(Nom, (Nom, Hide Tm))], Tm)
+           , ([((Nom, Hide Tm), String)], Tm)
+           )  -- wees, bigs
+qpr xs z v@((ws, wg), (bs, bg)) = pop (const True) >>= \case
+  Nothing -> gripe Mardiness
+  Just DoorStop -> case xs of
+    [] -> v <$ push DoorStop
+    x : _ -> gripe $ Scope x
+  Just (Bind yp@(yn, Hide ty) (User y)) -> case partition (y ==) xs of
+    ([], _) -> do
+      ty <- norm ty
+      wyn <- fresh y
+      let wy = (wyn, Hide ty)
+      qpr xs z
+        ( ((yn, wy) : map (id *** (id *** e4p (yn, TP wy))) ws, e4p (yn, TP wy) wg)
+        , ((yp, y) : bs, bg)
+        )
+    (_, xs) -> hnf ty >>= \ ty -> case ty of
+      TC d ss -> do
+        wyn <- fresh y
+        cope (isDataType d) (\ _ -> gripe $ NotADataType ty) return
+        let wy = (wyn, Hide (TC "$" [ty, z, TC "S" [TC "Z" []]]))
+        let by = (yn, Hide (TC "$" [ty, z, TC "Z" []]))
+        qpr xs z
+          ( ((yn, wy) : map (id *** (id *** e4p (yn, TP wy))) ws, e4p (yn, TP wy) wg)
+          , ((by, y) : map ((id *** e4p (yn, TP by)) *** id) bs, e4p (yn, TP by) bg)
+          )
+  Just (Bind (yn, Hide ty) (Defn tm)) -> qpr xs z
+    ( (map (id *** (id *** e4p (yn, tm ::: ty))) ws, e4p (yn, tm ::: ty) wg)
+    , (map ((id *** e4p (yn, tm ::: ty)) *** id) bs, e4p (yn, tm ::: ty) bg)
+    )
+  Just (Bind yp@(yn, Hide ty) Hole) -> qpr xs z
+    ( (ws, wg)
+    , ((yp, "") : bs, bg)
+    )
+  _ -> qpr xs z v
+        

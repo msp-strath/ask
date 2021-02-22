@@ -50,9 +50,9 @@ upsilon :: Syn -> Tm
 upsilon (t ::: _) = t
 upsilon e = TE e
 
-fnarg :: Syn -> [Tm] -> Maybe (Nom, [Tm], [Tm], [Tm])
+fnarg :: Syn -> [Tm] -> Maybe (Nom, Sch, [Tm], [Tm], [Tm])
 fnarg (e :$ s) ss = fnarg e (s : ss)
-fnarg (TF (f, _) is as) ss = Just (f, is, as, ss)
+fnarg (TF (f, Hide sch) is as) ss = Just (f, sch, is, as, ss)
 fnarg (TE e ::: _) ss = fnarg e ss
 fnarg _        _  = Nothing
 
@@ -60,17 +60,19 @@ hnfSyn :: Syn -> AM Syn
 hnfSyn e | track ("HNFSYN " ++ show e) False = undefined
 hnfSyn e = case fnarg e [] of
   Nothing -> hnfSyn' e
-  Just (f, is, as, ss) -> do
-    prog <- foldMap (red f) <$> gamma
+  Just (f, sch, is, as, ss) -> do
+    let red ((g, ps) :=: e) | f == g = [(ps, e)]
+        red _ = []
+        run :: [([Pat], Syn)] -> [Tm] -> AM Syn
+        run [] ts = return $ foldl (:$) (TF (f, Hide sch) is' as') ss' where
+          (is', us) = blump is ts
+          (as', ss') = blump as us
+        run ((ps, e) : prog) ts = snarf ps ts >>= \case
+          Left ts -> run prog ts
+          Right (m, ts) -> hnfSyn $ foldl (:$) (stan m e) ts
+    prog <- foldMap red <$> gamma
     run prog (is ++ as ++ ss)
  where
-  red f ((g, ps) :=: e) | f == g = [(ps, e)]
-  red f _ = []
-  run :: [([Pat], Syn)] -> [Tm] -> AM Syn
-  run [] _ = return e
-  run ((ps, e) : prog) ts = snarf ps ts >>= \case
-    Left ts -> run prog ts
-    Right (m, ts) -> hnfSyn $ foldl (:$) (stan m e) ts
   snarf :: [Pat] -> [Tm] -> AM (Either [Tm] (Matching, [Tm]))
   snarf [] ts = return $ Right ([], ts)
   snarf (p : ps) [] = return $ Left []
@@ -79,18 +81,20 @@ hnfSyn e = case fnarg e [] of
     (t, Just m) -> snarf ps ts >>= \case
       Left ts -> return $ Left (t : ts)
       Right (m', ts) -> return $ Right (m ++ m', ts)
+  blump [] xs = ([], xs)
+  blump (_ : ys) [] = ([], [])
+  blump (_ : ys) (x : xs) = ((x :) *** id) (blump ys xs)
 
 hnfSyn' :: Syn -> AM Syn
-hnfSyn' e@(TP (x, Hide ty)) = do
-  cope
-    (nomBKind x >>= \case
+hnfSyn' e@(TP (x, Hide ty)) = cope
+  (nomBKind x >>= \case
     Defn t -> do
       t <- hnf t
       ty <- hnf ty
       return (t ::: ty)
     _ -> return e)
-    (\ _ -> return e)
-    return
+  (\ _ -> return e)
+  return
 hnfSyn' (t ::: ty) = do
   t <- hnf t
   ty <- hnf ty
@@ -122,6 +126,8 @@ equal ty (x, y) = do
   x <- hnf x
   y <- hnf y
   case (x, y) of
+    (TC "$" [a, TE (TP (z, _)), i], TC "$" [b, TE (TP (y, _)), j])
+      | y == z && i == j -> equal Type (a, b)
     (TC c ss, TC d ts) | c == d -> do
       tel <- constructor ty c
       equals tel ss ts
@@ -156,7 +162,22 @@ eqSyn (f :$ s) (g :$ t) = do
   TC "->" [dom, ran] <- eqSyn f g
   equal dom (s, t)
   return ran
+eqSyn (TF (f, Hide sch) as bs) (TF (g, _) cs ds) | f == g =
+  eqFun sch (as, bs) (cs, ds)
 eqSyn _ _ = gripe NotEqual
+
+eqFun :: Sch -> ([Tm], [Tm]) -> ([Tm], [Tm]) -> AM Tm
+eqFun (Al s t) (a : as, bs) (c : cs, ds) = do
+  equal s (a, c)
+  eqFun (t // (a ::: s)) (as, bs) (cs, ds)
+eqFun (iss :>> t) ([], bs) ([], ds) = go [] iss t bs ds where
+  go m [] t [] [] = return $ stan m t
+  go m ((x, ty) : iss) t (b : bs) (d : ds) = do
+    let ty' = stan m ty
+    equal ty' (b, d)
+    go ((x, b) : m) iss t bs ds
+  go _ _ _ _ _ = gripe FAIL
+eqFun _ _ _ = gripe FAIL
 
 
 ------------------------------------------------------------------------------
@@ -236,13 +257,26 @@ elabTm ty (_, (t, _, y) :$$ ras) = do
   declared (Declare f _ _) = f == y
   declared _ = False
 
+shitSort :: [((String, Tm), Appl)] -> AM [((String, Tm), Appl)]
+shitSort [] = return []
+shitSort (a@((_, _), (_, (Lid, _, f) :$$ _)) : as) = cope (what's f)
+  (\ _ -> topInsert a <$> shitSort as)
+  $ \case
+    Right (_, ty) -> hnf ty >>= \case
+      TC "$" _ -> topInsert a <$> shitSort as
+      _ -> (a :) <$> shitSort as
+    _ -> (a :) <$> shitSort as
+shitSort (a@((_, _), (_, (_, _, "::") :$$ _)) : as) = (a :) <$> shitSort as
+shitSort (a : as) = topInsert a <$> shitSort as
+
 elabVec :: String -> Tel -> [Appl] -> AM (Tm, Matching)
 elabVec con tel as = do
   (ss, sch, pos) <- cope (specialise tel as)
     (\ _ -> gripe (WrongNumOfArgs con (ari tel) as))
     return
+  sch <- shitSort sch
   m <- argChk [] sch
-  traverse (demand . PROVE) pos
+  traverse (fred . PROVE) pos
   return (stan m $ TC con ss, m)
  where
   specialise :: Tel -> [Appl] -> AM ([Tm], [((String, Tm), Appl)], [Tm])
@@ -311,21 +345,26 @@ elabFun f az (iss :>> t) as = do
 -- I'm very far from convinced that I'm doing this right.
 
 subtype :: Tm -> Tm -> AM ()
-subtype s t | track ("SOOTY " ++ show s ++ " " ++ show t) False = undefined
-subtype (TC "->" [s0, t0]) u = do
-  (s1, t1) <- makeFun u
-  subtype s1 s0
-  subtype t0 t1
-subtype u (TC "->" [s1, t1]) = do
-  (s0, t0) <- makeFun u
-  subtype s1 s0
-  subtype t0 t1
-subtype (TC "$" [ty0, non0, num0]) (TC "$" [ty1, non1, num1]) = do
-  unify Type ty0 ty1
-  unify Zone non0 non1
-  greq num0 num1
-subtype (TC "$" [ty0, _, _]) ty1@(TC _ _) = unify Type ty0 ty1
-subtype got want = unify Type got want  -- not gonna last
+subtype s t = do
+  s <- hnf s
+  t <- hnf t
+  go s t
+ where
+  go s t | track ("SOOTY " ++ show s ++ " " ++ show t) False = undefined
+  go (TC "->" [s0, t0]) u = do
+    (s1, t1) <- makeFun u
+    subtype s1 s0
+    subtype t0 t1
+  go u (TC "->" [s1, t1]) = do
+    (s0, t0) <- makeFun u
+    subtype s1 s0
+    subtype t0 t1
+  go (TC "$" [ty0, non0, num0]) (TC "$" [ty1, non1, num1]) = do
+    unify Type ty0 ty1
+    unify Zone non0 non1
+    greq num0 num1
+  go (TC "$" [ty0, _, _]) ty1@(TC _ _) = unify Type ty0 ty1
+  go got want = unify Type got want  -- not gonna last
 
 greq :: Tm -> Tm -> AM ()
 greq _ (TC "Z" []) = return ()
@@ -351,13 +390,49 @@ unify ty a b = do  -- pay more attention to types
   b <- hnf b
   True <- track (show a ++ " =? " ++ show b) (return True)
   case (a, b) of
+    (TC "$" [a, TE (TP (z, _)), i], TC "$" [b, TE (TP (y, _)), j])
+      | z == y && i == j -> unify Type a b
     (TC f as, TC g bs) -> do
       guard $ f == g
       tel <- constructor ty f
       unifies tel as bs
-    (TE (TP xp), t) -> make xp t
-    (s, TE (TP yp)) -> make yp s
-    _ -> track (show a ++ " /= " ++ show b) $ gripe FAIL
+    (TE (TP xp), t) -> make xp t ty
+    (s, TE (TP yp)) -> make yp s ty
+    (TE e, TE f) -> () <$ unifySyn e f
+    _ -> cope (equal ty (a, b))
+      (\ _ -> do
+        True <- track (show a ++ " /= " ++ show b) $ return True
+        gripe FAIL)
+      return
+
+unifySyn :: Syn -> Syn -> AM Tm   --- eeeevil
+unifySyn (TP xp@(_, Hide ty)) e = do
+  ty <- eqSyn e e
+  ty <$ make xp (TE e) ty
+unifySyn e (TP xp@(_, Hide ty)) = do
+  ty <- eqSyn e e
+  ty <$ make xp (TE e) ty
+unifySyn (e :$ a) (f :$ b) = do
+  ty <- unifySyn e f >>= hnf
+  (dom, ran) <- makeFun ty
+  ran <$ unify dom a b
+unifySyn (TF (f, Hide sch) as bs) (TF (g, Hide _) cs ds) | f == g =
+  unifyFun sch (as , bs) (cs, ds)
+unifySyn _ _ = gripe FAIL
+
+unifyFun :: Sch -> ([Tm], [Tm]) -> ([Tm], [Tm]) -> AM Tm
+unifyFun (Al s t) (a : as, bs) (c : cs, ds) = do
+  unify s a c
+  unifyFun (t // (a ::: s)) (as, bs) (cs, ds)
+unifyFun (iss :>> t) ([], bs) ([], ds) = go [] iss t bs ds where
+  go m [] t [] [] = return $ stan m t
+  go m ((x, ty) : iss) t (b : bs) (d : ds) = do
+    let ty' = stan m ty
+    unify ty' b d
+    go ((x, b) : m) iss t bs ds
+  go _ _ _ _ _ = gripe FAIL
+unifyFun _ _ _ = gripe FAIL
+
 
 unifies :: Tel -> [Tm] -> [Tm] -> AM ()
 unifies tel as bs = prepare tel as bs >>= execute [] where
@@ -375,20 +450,25 @@ unifies tel as bs = prepare tel as bs >>= execute [] where
     unify (stan m s) a b
     execute ((x, a) : m) sch
 
-make :: (Nom, Hide Tm) -> Tm -> AM ()
-make (x, _) (TE (TP (y, _))) | x == y = return ()
-make (x, _) t | track ("MAKE " ++ show x ++ " = " ++ show t) False = undefined
-make xp@(x, Hide ty) t = do
+make :: (Nom, Hide Tm) -> Tm -> Tm -> AM ()
+make (x, _) (TE (TP (y, _))) got | x == y = return ()
+make (x, _) t got | track ("MAKE " ++ show x ++ " = " ++ show t) False = undefined
+make xp@(x, Hide ty) t  got = do
   nomBKind x >>= \case
     User _ -> case t of
       TE (TP yp@(y, _)) -> nomBKind y >>= \case
-        Hole -> make yp (TE (TP xp))
+        Hole -> make yp (TE (TP xp)) ty
         _ -> gripe FAIL
       _ -> gripe FAIL
     Defn s -> unify ty s t
     Hole -> do
+      got <- case t of
+        TE e -> eqSyn e e
+        _ -> return got
+      subtype got ty 
       ga <- gamma
       ga <- go ga []
+      True <- track "MADE" $ return True
       setGamma ga
  where
   go B0 ms = gripe FAIL -- shouldn't happen
@@ -556,25 +636,29 @@ nodup (x : xs)
 ------------------------------------------------------------------------------
 
 -- it is not safe to allow *construction* in sized types
+-- HA HA HA
 -- defined foo (n :: Nat) :: Nat induction n
 --   given foo (n :: Nat) :: Nat define foo n from n
 --     defined foo Z = Z
 --     defined foo (S n) = foo (S Z) -- no reason to believe Z is small enough
 
 constructor :: Tm -> Con -> AM Tel
-constructor ty con = do
-  (d, ss) <- hnf ty >>= \case
-    TC d ss -> return (d, ss)
-    ty -> (foldMap cand <$> gamma) >>= \case
-      [(p, tel)] -> do
-        (TC d ss, m) <- splat Type p
-        subtype (TC d ss) ty
-        return (d, ss)
-      _ -> gripe $ NonCanonicalType ty con
-  (fold <$> (gamma >>= traverse (try d ss con))) >>= \case
-    [] -> gripe (DoesNotMake con ty)
-    _ : _ : _ -> gripe (OverOverload con)
-    [tel] -> return tel
+constructor ty con = cope
+  (conSplit ty >>= \ cts -> mayhem $ lookup con cts)
+  (\ _ ->  do
+    (d, ss) <- hnf ty >>= \case
+      TC d ss -> return (d, ss)
+      ty -> (foldMap cand <$> gamma) >>= \case
+        [(p, tel)] -> do
+          (TC d ss, m) <- splat Type p
+          subtype (TC d ss) ty
+          return (d, ss)
+        _ -> gripe $ NonCanonicalType ty con
+    (fold <$> (gamma >>= traverse (try d ss con))) >>= \case
+      [] -> gripe (DoesNotMake con ty)
+      _ : _ : _ -> gripe (OverOverload con)
+      [tel] -> return tel)
+   return
  where
   try :: Con -> [Tm] -> Con -> CxE -> AM [Tel]
   try d ss c ((d', ps) ::> (c', tel)) | d == d' && c == c' = do
@@ -624,6 +708,7 @@ weeer d non num (Pr pos) = Pr pos
 
 conSplit :: Tm -> AM [(Con, Tel)]
 conSplit t = do
+  t <- hnf t
   z@(monkey, d, ts) <- case t of
     TC "$" [TC d ts, non, num] -> return (weeer d non (TC "S" [num]), d, ts)
     TC d ts -> return (id, d, ts)
@@ -640,3 +725,46 @@ conSplit t = do
     (\ _ -> return [])
     return
   refine _ _ = return []
+
+
+------------------------------------------------------------------------------
+--  Fred
+------------------------------------------------------------------------------
+
+tested :: Tm -> Tm -> Tm -> AM ()
+tested ty lhs rhs = flip (cope (equal ty (lhs, rhs))) return $ \ _ -> do
+  ty  <- hnf ty
+  lhs <- hnf lhs
+  rhs <- hnf rhs
+  case (ty, lhs, rhs) of
+    (_, TC a _, TC b _) | a /= b -> demand . PROVE $ FALSE
+    (_, TC c ss, TC d ts) | c == d -> do
+      tel <- constructor ty c
+      testSubterms tel ss ts
+    _ -> do
+      ga <- gamma
+      True <- track ("FRED: " ++ show ty ++ " " ++ show lhs ++ " " ++ show rhs ++ "\n" ++ show ga)
+        $ return True
+      demand . PROVE $ TC "=" [ty, lhs, rhs]
+
+testSubterms :: Tel -> [Tm] -> [Tm] -> AM ()
+testSubterms tel ss ts = go [] tel ss ts where -- cargo cult
+  go :: [((String, Tm), (Tm, Tm))] -> Tel -> [Tm] -> [Tm] -> AM ()
+  go acc (Pr _) [] [] = hit [] acc
+  go acc (Ex a b) (s : ss) (t : ts) = do
+    tested a s t
+    go acc (b // (s ::: a)) ss ts
+  go acc ((x, a) :*: b) (s : ss) (t : ts) =
+    go (topInsert ((x, a), (s, t)) acc) b ss ts
+  go _ _ _ _ = gripe NotEqual
+  hit :: Matching -> [((String, Tm), (Tm, Tm))] -> AM ()
+  hit m [] = return ()
+  hit m (((x, a), (s, t)) : sch) = do
+    tested (stan m a) s t
+    hit ((x, s) : m) sch
+
+fred :: Subgoal -> AM ()
+fred (PROVE g) = hnf g >>= \case
+  TC "=" [ty, lhs, rhs] -> tested ty lhs rhs
+  _ -> demand $ PROVE g
+fred s = demand s

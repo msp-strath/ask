@@ -1,0 +1,1 @@
+diff <(ask < $1.ask) $1.asked

@@ -103,8 +103,9 @@ data Sch
 ------------------------------------------------------------------------------
 
 data Subgoal
-  = PROVE Tm          -- of type Prop
-  | GIVEN Tm Subgoal  -- the hyp is a Prop
+  = PROVE Tm              -- of type Prop
+  | GIVEN Tm Subgoal      -- the hyp is a Prop
+  | EVERY Tm (Bind Subgoal)  -- universal quantifier
   -- more to follow, no doubt
   deriving Show
 
@@ -164,8 +165,10 @@ instance Thin Sch where
 instance Thin Subgoal where
   PROVE g   <^> th = PROVE (g <^> th)
   GIVEN h g <^> th = GIVEN (h <^> th) (g <^> th)
+  EVERY t b <^> th = EVERY (t <^> th) (b <^> th)
   thicken th (PROVE g)   = PROVE <$> thicken th g
   thicken th (GIVEN h g) = GIVEN <$> thicken th h <*> thicken th g
+  thicken th (EVERY t b) = EVERY <$> thicken th t <*> thicken th b
 
 instance Thin () where _ <^> _ = () ; thicken _ _ = Just ()
 
@@ -288,6 +291,11 @@ instance Stan Subgoal where
 
 instance Stan () where stan _ _ = () ; sbst _ _ _ = () ; abst _ _ _ = pure ()
 
+instance Stan t => Stan (Hide t) where
+  stan ms (Hide t) = Hide (stan ms t)
+  sbst u es (Hide t) = Hide (sbst u es t)
+  abst x i (Hide t) = Hide <$> abst x i t
+  
 
 ------------------------------------------------------------------------------
 --  Metavariable dependency testing and topological insertion

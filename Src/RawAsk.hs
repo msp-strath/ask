@@ -7,6 +7,7 @@
 {-# LANGUAGE
     DeriveFunctor
   , FlexibleInstances
+  , TupleSections
 #-}
 
 module Ask.Src.RawAsk where
@@ -56,7 +57,7 @@ data Make a t
   deriving (Functor)
 
 data SubMake a t
-  = ([LexL], [Given t]) ::- Make a t
+  = ([LexL], ([(Nom, String)], [Given t])) ::- Make a t
   | SubPGuff [LexL]
   deriving (Functor)
 
@@ -69,12 +70,13 @@ done m False = show m
 done m True  = show m ++ case m of {Prf -> "n"; Def -> "d"}
 
 data Method t
-  = Stub
+  = Stub Bool -- is there a "?" ?
   | By t
   | From t
   | MGiven
   | Is t
   | Ind [String]
+  | Tested Bool -- ed?
   deriving (Show, Functor)
 
 data Given t
@@ -181,16 +183,16 @@ pMake = do
   pMaking = Prf <$ (the Key "prove" <|> the Key "proven")
         <|> Def <$ (the Key "define" <|> the Key "defined")
   pMethod mk
-    =   Stub <$ the Sym "?"
+    =   Stub <$> ((True <$ the Sym "?") ?> (False <$ pure ()))
     <|> From <$ the Key "from" <* spc <*> pAppl []
-    <|> case mk of
-           Prf -> By   <$ the Key "by"   <* spc <*> pAppl []
-              <|> MGiven <$ the Key "given"
-           Def -> Is <$ the Sym "=" <* spc <*> pAppl []
-              <|> Ind <$ the Key "inductively" <* spc <*>
-                    sep (txt <$> kinda Lid) (spd (the Sym ","))
+    <|> By   <$ the Key "by"   <* spc <*> pAppl []
+    <|> MGiven <$ the Key "given"
+    <|> Is <$ guard (mk == Def) <* the Sym "=" <* spc <*> pAppl []
+    <|> Ind <$ the Key "inductively" <* spc <*>
+          sep (txt <$> kinda Lid) (spd (the Sym ","))
+    <|> Tested <$> (False <$ the Key "test" <|> True <$ the Key "tested")
   pSubs = lol "where" pSub <|> pure ([] :-/ Stop)
-  pSub = ((::-) <$> ext (pGivens <* spc) <*> pMake <* spc <* eol)
+  pSub = ((::-) <$> ext (([] ,) <$> pGivens <* spc) <*> pMake <* spc <* eol)
       ?> ((SubPGuff . fst) <$> ext (many (eat Just) <* eol))
   pGivens
     =   id <$ the Key "given" <* spc <*> sep (Given <$> pAppl []) (spd (the Sym ","))
