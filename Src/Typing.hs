@@ -394,11 +394,37 @@ unify ty a b = do  -- pay more attention to types
       unifies tel as bs
     (TE (TP xp), t) -> make xp t
     (s, TE (TP yp)) -> make yp s
+    (TE e, TE f) -> () <$ unifySyn e f
     _ -> cope (equal ty (a, b))
       (\ _ -> do
         True <- track (show a ++ " /= " ++ show b) $ return True
         gripe FAIL)
       return
+
+unifySyn :: Syn -> Syn -> AM Tm   --- eeeevil
+unifySyn (TP xp@(_, Hide ty)) e = ty <$ make xp (TE e)
+unifySyn e (TP xp@(_, Hide ty)) = ty <$ make xp (TE e)
+unifySyn (e :$ a) (f :$ b) = do
+  ty <- unifySyn e f >>= hnf
+  (dom, ran) <- makeFun ty
+  ran <$ unify dom a b
+unifySyn (TF (f, Hide sch) as bs) (TF (g, Hide _) cs ds) | f == g =
+  unifyFun sch (as , bs) (cs, ds)
+unifySyn _ _ = gripe FAIL
+
+unifyFun :: Sch -> ([Tm], [Tm]) -> ([Tm], [Tm]) -> AM Tm
+unifyFun (Al s t) (a : as, bs) (c : cs, ds) = do
+  unify s a c
+  unifyFun (t // (a ::: s)) (as, bs) (cs, ds)
+unifyFun (iss :>> t) ([], bs) ([], ds) = go [] iss t bs ds where
+  go m [] t [] [] = return $ stan m t
+  go m ((x, ty) : iss) t (b : bs) (d : ds) = do
+    let ty' = stan m ty
+    unify ty' b d
+    go ((x, b) : m) iss t bs ds
+  go _ _ _ _ _ = gripe FAIL
+unifyFun _ _ _ = gripe FAIL
+
 
 unifies :: Tel -> [Tm] -> [Tm] -> AM ()
 unifies tel as bs = prepare tel as bs >>= execute [] where
