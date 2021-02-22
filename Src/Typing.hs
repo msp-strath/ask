@@ -458,9 +458,13 @@ make xp@(x, Hide ty) t  got = do
       _ -> gripe FAIL
     Defn s -> unify ty s t
     Hole -> do
+      got <- case t of
+        TE e -> eqSyn e e
+        _ -> return got
       subtype got ty 
       ga <- gamma
       ga <- go ga []
+      True <- track "MADE" $ return True
       setGamma ga
  where
   go B0 ms = gripe FAIL -- shouldn't happen
@@ -760,5 +764,3 @@ fred (PROVE g) = hnf g >>= \case
   TC "=" [ty, lhs, rhs] -> tested ty lhs rhs
   _ -> demand $ PROVE g
 fred s = demand s
-
-  

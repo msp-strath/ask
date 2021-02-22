@@ -215,6 +215,7 @@ qpr xs z v@((ws, wg), (bs, bg)) = pop (const True) >>= \case
     x : _ -> gripe $ Scope x
   Just (Bind yp@(yn, Hide ty) (User y)) -> case partition (y ==) xs of
     ([], _) -> do
+      ty <- norm ty
       wyn <- fresh y
       let wy = (wyn, Hide ty)
       qpr xs z

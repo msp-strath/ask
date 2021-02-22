@@ -761,6 +761,42 @@ filthier as s = case runAM go () as of
     setFixities fo
     bifoldMap (($ "") . rfold lout) id <$> traverse askRawDecl b
 
+coo :: String
+coo = unlines
+  [ "data N = Z | S N"
+  , "(+) :: N -> N -> N"
+  , "define x + y inductively x where"
+  , "  define x + y from x where"
+  , "    define Z + y = y"
+  , "    define S x' + y = S (x' + y)"
+  , "prove (x + y) + z = x + (y + z) inductively x"
+  ]
+
+doo :: String
+doo = unlines
+  [ "data N = Z | S N"
+  , "(+) :: N -> N -> N"
+  , "define x + y inductively x where"
+  , "  define x + y from x where"
+  , "    define Z + y = y"
+  , "    define S x' + y = S (x' + y)"
+  , "prove (x + y) + z = x + (y + z) inductively x where"
+  , "  prove x + y + z = x + (y + z) from x"
+  ]
+
+eoo :: String
+eoo = unlines
+  [ "data N = Z | S N"
+  , "(+) :: N -> N -> N"
+  , "define x + y inductively x where"
+  , "  define x + y from x where"
+  , "    define Z + y = y"
+  , "    define S x' + y = S (x' + y)"
+  , "prove (x + y) + z = x + (y + z) inductively x where"
+  , "  prove x + y + z = x + (y + z) from x where"
+  , "    given x = S x33 prove S x33 + y + z = S x33 + (y + z) tested"
+  ]
+
 foo :: String
 foo = unlines
   [ "data N = Z | S N"
@@ -769,5 +805,8 @@ foo = unlines
   , "  define x + y from x where"
   , "    define Z + y = y"
   , "    define S x' + y = S (x' + y)"
-  , "prove (x + y) + z = x + (y + z) inductively x"
+  , "prove (x + y) + z = x + (y + z) inductively x where"
+  , "  prove x + y + z = x + (y + z) from x where"
+  , "    given x = S x33 prove S x33 + y + z = S x33 + (y + z) tested where"
+  , "      prove x33 + y + z = x33 + (y + z) given"
   ]
