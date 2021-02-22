@@ -291,6 +291,11 @@ instance Stan Subgoal where
 
 instance Stan () where stan _ _ = () ; sbst _ _ _ = () ; abst _ _ _ = pure ()
 
+instance Stan t => Stan (Hide t) where
+  stan ms (Hide t) = Hide (stan ms t)
+  sbst u es (Hide t) = Hide (sbst u es t)
+  abst x i (Hide t) = Hide <$> abst x i t
+  
 
 ------------------------------------------------------------------------------
 --  Metavariable dependency testing and topological insertion

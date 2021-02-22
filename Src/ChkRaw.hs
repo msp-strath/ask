@@ -46,7 +46,7 @@ passive (Make k g m () ps src) =
   Make k (Your g) (fmap Your m) (Keep, False) (fmap subPassive ps) src
   
 subPassive :: SubMake () Appl -> SubMake Anno TmR
-subPassive ((srg, gs) ::- p) = (srg, map (fmap Your) gs) ::- passive p
+subPassive ((srg, (ds, gs)) ::- p) = (srg, (ds, map (fmap Your) gs)) ::- passive p
 subPassive (SubPGuff ls) = SubPGuff ls
 
 surplus :: Make () Appl -> Make Anno TmR
@@ -54,7 +54,7 @@ surplus (Make k g m () ps src) =
   Make k (Your g) (fmap Your m) (Junk Surplus, True) (fmap subPassive ps) src
   
 subSurplus :: SubMake () Appl -> SubMake Anno TmR
-subSurplus ((srg, gs) ::- p) = (srg, map (fmap Your) gs) ::- surplus p
+subSurplus ((srg, (ds, gs)) ::- p) = (srg, (ds, map (fmap Your) gs)) ::- surplus p
 subSurplus (SubPGuff ls) = SubPGuff ls
 
 chkProg
@@ -149,7 +149,14 @@ chkProof
   -> ([LexL], [LexL])  -- source tokens (head, body)
   -> AM (Make Anno TmR)  -- the reconstructed proof
 
-chkProof g m ps src = cope go junk return where
+chkProof g m ps src = do
+  ga <- filter (\case {Bind _ _ -> True; _ -> False}) <$> ((<>> []) <$> gamma)
+  True <- tracy ("OHAI: " ++ show g ++ " " ++ show m ++ "\n" ++ show ga) $ return True
+  cope go junk $ \ p -> do
+    ga <- filter (\case {Bind _ _ -> True; _ -> False}) <$> ((<>> []) <$> gamma)
+    True <- tracy ("KTHXBAI: " ++ show p ++ "\n" ++ show ga) $ return True
+    return p
+ where
   junk gr = return $ Make Prf g (fmap Your m) (Junk gr, True)
     (fmap subPassive ps) src
   go = case my g of
@@ -164,16 +171,14 @@ chkProof g m ps src = cope go junk return where
             fromSubs gt ht
             return (From (Our ht h))
         From h@(_, (Lid, _, x) :$$ []) -> what's x >>= \case
-          Right (e@(TP xp), ty) -> hnf ty >>= \case
-            TC d ss -> foldMap (\case {Data c cs | c == d -> [cs]; _ -> []})
-              <$> gamma >>= \case
-                [cs] -> From (Our (TE e) h) <$
-                  traverse (splitProof xp (d, ss) gt) cs
-                _ -> gripe $ FAIL -- FIXME!
+          Right (e@(TP xp), ty) -> do
+            ty <- hnf ty
+            cts <- conSplit ty
+            From (Our (TE e) h) <$
+              traverse (splitProof xp ty gt) cts
           _ -> gripe $ FromNeedsConnective h
         From h -> gripe $ FromNeedsConnective h
         Ind xs -> do
-          True <- tracy "HELLO" $ return True
           indPrf gt xs
           return $ Ind xs
         MGiven -> hnf gt >>= \case
@@ -232,7 +237,7 @@ chkSubProofs ps = do
     True <- tracy ("COVERS: " ++ show sg ++ " ? " ++ show sp) $ return True
     go sg sp
    where
-    go t ((_, hs) ::- Make Prf g m (Keep, _) _ _) = subgoal t $ \ t -> do
+    go t ((_, (_, hs)) ::- Make Prf g m (Keep, _) _ _) = subgoal t $ \ t -> do
       g <- mayhem $ my g
       traverse smegUp (g : [h | Given x <- hs, Just h <- [my x]])
       traverse ensure hs
@@ -256,7 +261,7 @@ chkSubProofs ps = do
     go (ga :< Expect p) ps = go ga (blep p : ps)
     go (ga :< z) ps = ((:< z) *** id) <$> go ga ps
     blep :: Proglem -> SubMake Anno TmR
-    blep p = ([], []) ::- -- bad hack on its way!
+    blep p = ([], ([], [])) ::- -- bad hack on its way!
       Make Def (My (TC (uName p) (fst (frob [] (map fst (leftSatu p ++ leftAppl p))))))
         (Stub True) (Need, False) ([] :-/ Stop) ([], [])
       where
@@ -299,36 +304,16 @@ chkSubProofs ps = do
     <|> equal Prop (s, TRUE)
             
   need (PROVE g) = return $
-    ([], []) ::- Make Prf (My g) (Stub True) (Need, False)
+    ([], ([], [])) ::- Make Prf (My g) (Stub True) (Need, False)
       ([] :-/ Stop) ([], [])
   need (GIVEN h u) = need u >>= \case
-    (_, gs) ::- p -> return $ ([], Given (My h) : gs) ::- p
+    (_, (ds, gs)) ::- p -> return $ ([], (ds, Given (My h) : gs)) ::- p
     s -> return s
   need (EVERY s b) = ("x", s) |:- \ x@(TP (xn, _)) ->
     need (b // x)
   glom :: Bloc x -> [x] -> Bloc x
   glom (g :-/ p :-\ gps) = (g :-/) . (p :-\) . glom gps
   glom end = foldr (\ x xs -> [] :-/ x :-\ xs) end
-
-smegUp :: Tm -> AM ()
-smegUp (TE e) = smegDown e
-smegUp (TC _ hs) = () <$ traverse smegUp hs
-smegUp (TB (L t)) = smegUp t
-smegUp (TB (K t)) = smegUp t
-smegUp _ = return ()
-
-smegDown :: Syn -> AM ()
-smegDown (TP xp@(x, Hide ty)) =
-  cope (nomBKind x)
-    (\ _ -> do
-      push $ Bind xp Hole
-      True <- tracy ("GUESS: " ++ show x) $ return True
-      return ())
-    (\ _ -> return ())
-smegDown (tm ::: ty) = smegUp tm >> smegUp ty
-smegDown (f :$ s) = smegDown f >> smegUp s
-smegDown (TF _ as bs) = traverse smegUp as >> traverse smegUp bs >> return ()
-smegDown _ = return ()
 
 subgoal :: Subgoal -> (Tm -> AM x) -> AM x
 subgoal (GIVEN h g) k = h |- subgoal g k
@@ -340,31 +325,33 @@ validSubProof
   -> SubMake () Appl
   -> AM (Bool, SubMake Anno TmR)
 validSubProof sgs sps = do
+  True <- tracy ("VSUB: " ++ show sps) $ return True
   push ImplicitQuantifier -- cheeky!
   (b, m)  <- go sps
   ga <- gamma
-  let (ga', ds) = jank ga
-  setGamma ga'
-  return (b, splott ds m)
+  (ga, ds, us) <- jank ga
+  True <- tracy ("JANK: " ++ show us) $ return True
+  setGamma ga
+  return (b, splott us ds m)
  where
-  go ((srg, Given h : gs) ::- p@(Make k sg sm () sps src)) =
+  go ((srg, (ds, Given h : gs)) ::- p@(Make k sg sm () sps src)) =
     cope (elabTm Prop h)
-      (\ gr -> return $ (False, (srg, map (fmap Your) (Given h : gs)) ::-
+      (\ gr -> return $ (False, (srg, (ds, map (fmap Your) (Given h : gs))) ::-
         Make k (Your sg) (fmap Your sm) (Junk gr, True)
           (fmap subPassive sps) src))
       $ \ ht -> do
-        (b, (srg, gs) ::- p) <- ht |- go ((srg, gs) ::- p)
-        return $ (b, (srg, Given (Our ht h) : gs) ::- p)
-  go ((srg, []) ::- Make Prf sg sm () sps src) =
+        (b, (srg, (ds, gs)) ::- p) <- ht |- go ((srg, (ds, gs)) ::- p)
+        return $ (b, (srg, (ds, Given (Our ht h) : gs)) ::- p)
+  go ((srg, (ds, [])) ::- Make Prf sg sm () sps src) =
     cope (elabTmR Prop sg)
-      (\ gr -> return $ (False, (srg, []) ::- Make Prf (Your sg) (fmap Your sm)
+      (\ gr -> return $ (False, (srg, (ds, [])) ::- Make Prf (Your sg) (fmap Your sm)
         (Junk gr, True) (fmap subPassive sps) src))
-      $ \ sg -> (False, ) <$> (((srg, []) ::-) <$> chkProof sg sm sps src)
-  go ((srg, []) ::- Make Def sg@(_, (_, _, f) :$$ as) sm () sps src) = do
+      $ \ sg -> (False, ) <$> (((srg, (ds, [])) ::-) <$> chkProof sg sm sps src)
+  go ((srg, (ds, [])) ::- Make Def sg@(_, (_, _, f) :$$ as) sm () sps src) = do
     p <- gamma >>= expected f as
     True <- tracy ("FOUND " ++ show p) $ return True
     True <- gamma >>= \ ga -> tracy (show ga) $ return True
-    (True,) <$> (((srg, []) ::-) <$> chkProg p sg sm sps src)
+    (True,) <$> (((srg, (ds, [])) ::-) <$> chkProg p sg sm sps src)
    where
     expected f as B0 = gripe Surplus
     expected f as (ga :< z) = do
@@ -376,17 +363,24 @@ validSubProof sgs sps = do
         (\ gr -> expected f as ga <* push z)
         (<$ setGamma ga)
   go (SubPGuff ls) = return $ (False, SubPGuff ls)
-  jank (ga :< ImplicitQuantifier) = (ga, [])
-  jank (ga :< Bind (x, Hide ty) k) = case k of
-    Defn t -> let (ga', ds) = jank ga in
-      (ga', (x, rfold e4p ds (t ::: ty)) : ds)
-    _ -> jank ga
-  jank (ga :< z) = (ga' :< z, ds) where (ga', ds) = jank ga
-  jank ga = (ga, [])
-  splott ds ((ls, hs) ::- Make mk g me a sps src) =
-    ((ls, [Given (rfold e4p ds h) | Given h <- hs]) ::-
+  jank (ga :< ImplicitQuantifier) = return (ga, [], [])
+  jank (ga :< Bind (x, Hide ty) k) = do
+    (ga, ds, us) <- jank ga
+    ty <- norm ty
+    case k of
+      Defn t -> do
+        t <- norm t
+        return (ga, (x, rfold e4p ds (t ::: ty)) : ds, us)
+      User y -> return (ga, (x, TP (x, Hide ty)) : ds, (x, y) : us)
+      _ -> return (ga, (x, TP (x, Hide ty)) : ds, us)
+  jank (ga :< z) = do
+    (ga, ds, us) <- jank ga
+    return (ga :< z, ds, us)
+  jank ga = return (ga, [], [])
+  splott us ds ((ls, (vs, hs)) ::- Make mk g me a sps src) =
+    ((ls, (vs ++ us, [Given (rfold e4p ds h) | Given h <- hs])) ::- 
      Make mk (rfold e4p ds g) me a sps src)
-  splott _ s = s
+  splott _ _ s = s
 
 fromSubs
   :: Tm      -- goal
@@ -442,15 +436,20 @@ pout k p@(Make mk g m (s, n) ps (h, b)) = let k' = scavenge b in case s of
    subpout _ (SubPGuff ls)
      | all gappy ls = return $ rfold lout ls "" :-/ Stop
      | otherwise = return $ ("{- " ++ rfold lout ls " -}") :-/ Stop
-   subpout _ ((srg, gs) ::- Make m _ _ (Junk e, _) _ (h, b)) = do
+   subpout _ ((srg, _) ::- Make m _ _ (Junk e, _) _ (h, b)) = do
      e <- ppGripe e
      return $
        ("{- " ++ e) :-/ [] :-\
        (rfold lout srg . rfold lout h . rfold lout b $ "") :-/ [] :-\
        "-}" :-/ Stop
-   subpout k ((srg, gs) ::- p) = fish gs (pout k p) >>= \case
-     p :-/ b -> (:-/ b) <$>
-       ((if null srg then givs gs else pure $ rfold lout srg) <*> pure p)
+   subpout k ((srg, (ds, gs)) ::- p) = do
+     doorStop
+     for ds $ \ (nom, u) -> push $ Bind (nom, Hide Prop) (User u) -- nasty
+     z <- fish gs (pout k p) >>= \case
+        p :-/ b -> (:-/ b) <$>
+          ((if null srg then givs gs else pure $ rfold lout srg) <*> pure p)
+     doorStep
+     return z
     where
      fish [] p = p
      fish (Given h : gs) p = case my h of
@@ -696,7 +695,7 @@ askRawDecl (RawProof (Make Def gr@(_, (_, _, f) :$$ as) mr () ps src), ls) = id
        e <- ppGripe gr
        return $ "{- " ++ e ++ "\n" ++ rfold lout ls "\n-}")
     return
-  -- <* doorStep
+  <* doorStep
 askRawDecl (RawProp tmpl intros, ls) = cope (chkProp tmpl intros)
   (\ gr -> do
     e <- ppGripe gr
@@ -765,12 +764,12 @@ filthier as s = case runAM go () as of
 foo :: String
 foo = unlines
   [ "data N = Z | S N"
-  , "data Bool = True | False"
-  , "isS :: N -> Bool"
-  , "define isS n from n where"
-  , "  define isS Z = False"
-  , "  define isS (S x) = True"
-  , "prove n = Z | isS n = True from n where"
-  , "  given n = Z prove (Z :: N) = Z | isS Z = True ?"
-  , "  given n = S x prove (S x :: N) = Z | isS (S x) = True ?"
+  , "(+) :: N -> N -> N"
+  , "define x + y inductively x where"
+  , "  define x + y from x where"
+  , "    define Z + y = y"
+  , "    define S x' + y = S (x' + y)"
+  , "prove x + Z = x inductively x where"
+  , "  prove x + Z = x from x where"
+  , "    given x = S x' prove S x' + Z = S x' tested"
   ]

@@ -7,6 +7,7 @@
 {-# LANGUAGE
     DeriveFunctor
   , FlexibleInstances
+  , TupleSections
 #-}
 
 module Ask.Src.RawAsk where
@@ -56,7 +57,7 @@ data Make a t
   deriving (Functor)
 
 data SubMake a t
-  = ([LexL], [Given t]) ::- Make a t
+  = ([LexL], ([(Nom, String)], [Given t])) ::- Make a t
   | SubPGuff [LexL]
   deriving (Functor)
 
@@ -191,7 +192,7 @@ pMake = do
           sep (txt <$> kinda Lid) (spd (the Sym ","))
     <|> Tested <$> (False <$ the Key "test" <|> True <$ the Key "tested")
   pSubs = lol "where" pSub <|> pure ([] :-/ Stop)
-  pSub = ((::-) <$> ext (pGivens <* spc) <*> pMake <* spc <* eol)
+  pSub = ((::-) <$> ext (([] ,) <$> pGivens <* spc) <*> pMake <* spc <* eol)
       ?> ((SubPGuff . fst) <$> ext (many (eat Just) <* eol))
   pGivens
     =   id <$ the Key "given" <* spc <*> sep (Given <$> pAppl []) (spd (the Sym ","))

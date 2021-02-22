@@ -64,12 +64,12 @@ ppTmR spot t = case readyTmR t of
 
 ppTm :: Spot -> Tm -> AM String
 ppTm spot (TC f@(c : s) as)
-  | isAlpha c = go f
+  | isAlpha c = go f as
   | c == '(' = do
     let n = case span (',' ==) s of
          ([], _) -> 0
          (cs, _) -> 1 + length cs
-    if n /= length as then go f else do
+    if n /= length as then go f as else do
       as <- traverse (ppTm AllOK) as
       return $ "(" ++ intercalate ", " as ++ ")"
   | f == "=" = case as of
@@ -83,42 +83,47 @@ ppTm spot (TC f@(c : s) as)
         lhs <- ppTm (Infix (4, Left NAsso)) lhs
         rhs <- ppTm (Infix (4, Right NAsso)) rhs
         return $ pppa spot (Inf (4, NAsso)) (lhs ++ " = " ++ rhs)
-      _ -> go "(=)"
+      _ -> go "(=)" as
   | otherwise = case as of
-    [x, y] -> do
+    x : y : as -> do
       (p, a) <- fixity f
       x <- ppTm (Infix (p, Left a)) x
       y <- ppTm (Infix (p, Right a)) y
-      return $ pppa spot (Inf (p, a)) (x ++ " " ++ f ++ " " ++ y)
-    _ -> go ("(" ++ f ++ ")")
+      case as of
+        [] -> return $ pppa spot (Inf (p, a)) (x ++ " " ++ f ++ " " ++ y)
+        _ -> go ("(" ++ x ++ " " ++ f ++ " " ++ y ++ ")") as
+    _ -> go ("(" ++ f ++ ")") as
  where
-  go f = case as of
+  go f as = case as of
     [] -> return f
     _  -> do
       as <- traverse (ppTm Arg) as
       return $ pppa spot App (f ++ (as >>= (" " ++)))
-ppTm spot (TE e) = ppEl spot e
+ppTm spot (TE e) = ppEl spot e []
 ppTm _ t = return $ show t
 
-ppEl :: Spot -> Syn -> AM String
-ppEl _ (TV i) = pinx i
-ppEl _ (TP (x, _)) = pnom x
-ppEl spot (t ::: ty) = do
+ppEl :: Spot -> Syn -> [Tm] -> AM String
+ppEl spot (TV i) as = pinx i >>= ppArgs spot as
+ppEl spot (TP (x, _)) as = pnom x >>= ppArgs spot as
+ppEl spot (t ::: ty) [] = do
   t <- ppTm RadSpot t
   ty <- ppTm RadSpot ty
   return . pppa spot Rad $ t ++ " :: " ++ ty
-ppEl spot (f :$ s) = do
-  f <- ppEl Fun f
-  s <-  ppTm Arg s
-  return . pppa spot App $ f ++ " " ++ s
-ppEl spot (TF (f, Hide sch) ss ts) = do
+ppEl spot (t ::: ty) as = do
+  t <- ppTm RadSpot t
+  ty <- ppTm RadSpot ty
+  ppArgs spot as ("(" ++ t ++ " :: " ++ ty ++ ")")
+ppEl spot (f :$ s) as = ppEl spot f (s : as)
+ppEl spot (TF (f, Hide sch) ss ts) as = do
   ss <- return $ dump sch ss
-  ppTm spot (TC (fst (last f)) (ss ++ ts))
+  ppArgs spot (ss ++ ts ++ as) (fst (last f))
   -- terrible hack
  where
   dump (Al a t) (s : ss) = dump (t // (s ::: a)) ss
   dump _ ss = ss
 
+ppArgs :: Spot -> [Tm] -> String -> AM String
+ppArgs spot ts f = ppTm spot (TC f ts) -- you dirty so-and-so
 
 ppGripe :: Gripe -> AM String
 ppGripe Surplus = return "I don't see why you need this"

@@ -122,6 +122,8 @@ equal ty (x, y) = do
   x <- hnf x
   y <- hnf y
   case (x, y) of
+    (TC "$" [a, TE (TP (z, _)), i], TC "$" [b, TE (TP (y, _)), j])
+      | y == z && i == j -> equal Type (a, b)
     (TC c ss, TC d ts) | c == d -> do
       tel <- constructor ty c
       equals tel ss ts
@@ -156,7 +158,22 @@ eqSyn (f :$ s) (g :$ t) = do
   TC "->" [dom, ran] <- eqSyn f g
   equal dom (s, t)
   return ran
+eqSyn (TF (f, Hide sch) as bs) (TF (g, _) cs ds) | f == g =
+  eqFun sch (as, bs) (cs, ds)
 eqSyn _ _ = gripe NotEqual
+
+eqFun :: Sch -> ([Tm], [Tm]) -> ([Tm], [Tm]) -> AM Tm
+eqFun (Al s t) (a : as, bs) (c : cs, ds) = do
+  equal s (a, c)
+  eqFun (t // (a ::: s)) (as, bs) (cs, ds)
+eqFun (iss :>> t) ([], bs) ([], ds) = go [] iss t bs ds where
+  go m [] t [] [] = return $ stan m t
+  go m ((x, ty) : iss) t (b : bs) (d : ds) = do
+    let ty' = stan m ty
+    equal ty' (b, d)
+    go ((x, b) : m) iss t bs ds
+  go _ _ _ _ _ = gripe FAIL
+eqFun _ _ _ = gripe FAIL
 
 
 ------------------------------------------------------------------------------
@@ -236,18 +253,25 @@ elabTm ty (_, (t, _, y) :$$ ras) = do
   declared (Declare f _ _) = f == y
   declared _ = False
 
-shitSort :: [((String, Tm), Appl)] -> [((String, Tm), Appl)]
-shitSort [] = []
-shitSort (a@((_, _), (_, (Lid, _, _) :$$ _)) : as) = a : shitSort as
-shitSort (a@((_, _), (_, (_, _, "::") :$$ _)) : as) = a : shitSort as
-shitSort (a : as) = topInsert a (shitSort as)
+shitSort :: [((String, Tm), Appl)] -> AM [((String, Tm), Appl)]
+shitSort [] = return []
+shitSort (a@((_, _), (_, (Lid, _, f) :$$ _)) : as) = cope (what's f)
+  (\ _ -> topInsert a <$> shitSort as)
+  $ \case
+    Right (_, ty) -> hnf ty >>= \case
+      TC "$" _ -> topInsert a <$> shitSort as
+      _ -> (a :) <$> shitSort as
+    _ -> (a :) <$> shitSort as
+shitSort (a@((_, _), (_, (_, _, "::") :$$ _)) : as) = (a :) <$> shitSort as
+shitSort (a : as) = topInsert a <$> shitSort as
 
 elabVec :: String -> Tel -> [Appl] -> AM (Tm, Matching)
 elabVec con tel as = do
   (ss, sch, pos) <- cope (specialise tel as)
     (\ _ -> gripe (WrongNumOfArgs con (ari tel) as))
     return
-  m <- argChk [] (shitSort sch)
+  sch <- shitSort sch
+  m <- argChk [] sch
   traverse (fred . PROVE) pos
   return (stan m $ TC con ss, m)
  where
@@ -317,21 +341,26 @@ elabFun f az (iss :>> t) as = do
 -- I'm very far from convinced that I'm doing this right.
 
 subtype :: Tm -> Tm -> AM ()
-subtype s t | track ("SOOTY " ++ show s ++ " " ++ show t) False = undefined
-subtype (TC "->" [s0, t0]) u = do
-  (s1, t1) <- makeFun u
-  subtype s1 s0
-  subtype t0 t1
-subtype u (TC "->" [s1, t1]) = do
-  (s0, t0) <- makeFun u
-  subtype s1 s0
-  subtype t0 t1
-subtype (TC "$" [ty0, non0, num0]) (TC "$" [ty1, non1, num1]) = do
-  unify Type ty0 ty1
-  unify Zone non0 non1
-  greq num0 num1
-subtype (TC "$" [ty0, _, _]) ty1@(TC _ _) = unify Type ty0 ty1
-subtype got want = unify Type got want  -- not gonna last
+subtype s t = do
+  s <- hnf s
+  t <- hnf t
+  go s t
+ where
+  go s t | track ("SOOTY " ++ show s ++ " " ++ show t) False = undefined
+  go (TC "->" [s0, t0]) u = do
+    (s1, t1) <- makeFun u
+    subtype s1 s0
+    subtype t0 t1
+  go u (TC "->" [s1, t1]) = do
+    (s0, t0) <- makeFun u
+    subtype s1 s0
+    subtype t0 t1
+  go (TC "$" [ty0, non0, num0]) (TC "$" [ty1, non1, num1]) = do
+    unify Type ty0 ty1
+    unify Zone non0 non1
+    greq num0 num1
+  go (TC "$" [ty0, _, _]) ty1@(TC _ _) = unify Type ty0 ty1
+  go got want = unify Type got want  -- not gonna last
 
 greq :: Tm -> Tm -> AM ()
 greq _ (TC "Z" []) = return ()
@@ -357,13 +386,19 @@ unify ty a b = do  -- pay more attention to types
   b <- hnf b
   True <- track (show a ++ " =? " ++ show b) (return True)
   case (a, b) of
+    (TC "$" [a, TE (TP (z, _)), i], TC "$" [b, TE (TP (y, _)), j])
+      | z == y && i == j -> unify Type a b
     (TC f as, TC g bs) -> do
       guard $ f == g
       tel <- constructor ty f
       unifies tel as bs
     (TE (TP xp), t) -> make xp t
     (s, TE (TP yp)) -> make yp s
-    _ -> track (show a ++ " /= " ++ show b) $ gripe FAIL
+    _ -> cope (equal ty (a, b))
+      (\ _ -> do
+        True <- track (show a ++ " /= " ++ show b) $ return True
+        gripe FAIL)
+      return
 
 unifies :: Tel -> [Tm] -> [Tm] -> AM ()
 unifies tel as bs = prepare tel as bs >>= execute [] where
@@ -562,25 +597,29 @@ nodup (x : xs)
 ------------------------------------------------------------------------------
 
 -- it is not safe to allow *construction* in sized types
+-- HA HA HA
 -- defined foo (n :: Nat) :: Nat induction n
 --   given foo (n :: Nat) :: Nat define foo n from n
 --     defined foo Z = Z
 --     defined foo (S n) = foo (S Z) -- no reason to believe Z is small enough
 
 constructor :: Tm -> Con -> AM Tel
-constructor ty con = do
-  (d, ss) <- hnf ty >>= \case
-    TC d ss -> return (d, ss)
-    ty -> (foldMap cand <$> gamma) >>= \case
-      [(p, tel)] -> do
-        (TC d ss, m) <- splat Type p
-        subtype (TC d ss) ty
-        return (d, ss)
-      _ -> gripe $ NonCanonicalType ty con
-  (fold <$> (gamma >>= traverse (try d ss con))) >>= \case
-    [] -> gripe (DoesNotMake con ty)
-    _ : _ : _ -> gripe (OverOverload con)
-    [tel] -> return tel
+constructor ty con = cope
+  (conSplit ty >>= \ cts -> mayhem $ lookup con cts)
+  (\ _ ->  do
+    (d, ss) <- hnf ty >>= \case
+      TC d ss -> return (d, ss)
+      ty -> (foldMap cand <$> gamma) >>= \case
+        [(p, tel)] -> do
+          (TC d ss, m) <- splat Type p
+          subtype (TC d ss) ty
+          return (d, ss)
+        _ -> gripe $ NonCanonicalType ty con
+    (fold <$> (gamma >>= traverse (try d ss con))) >>= \case
+      [] -> gripe (DoesNotMake con ty)
+      _ : _ : _ -> gripe (OverOverload con)
+      [tel] -> return tel)
+   return
  where
   try :: Con -> [Tm] -> Con -> CxE -> AM [Tel]
   try d ss c ((d', ps) ::> (c', tel)) | d == d' && c == c' = do
@@ -630,6 +669,7 @@ weeer d non num (Pr pos) = Pr pos
 
 conSplit :: Tm -> AM [(Con, Tel)]
 conSplit t = do
+  t <- hnf t
   z@(monkey, d, ts) <- case t of
     TC "$" [TC d ts, non, num] -> return (weeer d non (TC "S" [num]), d, ts)
     TC d ts -> return (id, d, ts)
@@ -662,7 +702,11 @@ tested ty lhs rhs = flip (cope (equal ty (lhs, rhs))) return $ \ _ -> do
     (_, TC c ss, TC d ts) | c == d -> do
       tel <- constructor ty c
       testSubterms tel ss ts
-    _ -> demand . PROVE $ TC "=" [ty, lhs, rhs]
+    _ -> do
+      ga <- gamma
+      True <- track ("FRED: " ++ show ty ++ " " ++ show lhs ++ " " ++ show rhs ++ "\n" ++ show ga)
+        $ return True
+      demand . PROVE $ TC "=" [ty, lhs, rhs]
 
 testSubterms :: Tel -> [Tm] -> [Tm] -> AM ()
 testSubterms tel ss ts = go [] tel ss ts where -- cargo cult
