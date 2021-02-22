@@ -50,9 +50,9 @@ upsilon :: Syn -> Tm
 upsilon (t ::: _) = t
 upsilon e = TE e
 
-fnarg :: Syn -> [Tm] -> Maybe (Nom, [Tm], [Tm], [Tm])
+fnarg :: Syn -> [Tm] -> Maybe (Nom, Sch, [Tm], [Tm], [Tm])
 fnarg (e :$ s) ss = fnarg e (s : ss)
-fnarg (TF (f, _) is as) ss = Just (f, is, as, ss)
+fnarg (TF (f, Hide sch) is as) ss = Just (f, sch, is, as, ss)
 fnarg (TE e ::: _) ss = fnarg e ss
 fnarg _        _  = Nothing
 
@@ -60,17 +60,19 @@ hnfSyn :: Syn -> AM Syn
 hnfSyn e | track ("HNFSYN " ++ show e) False = undefined
 hnfSyn e = case fnarg e [] of
   Nothing -> hnfSyn' e
-  Just (f, is, as, ss) -> do
-    prog <- foldMap (red f) <$> gamma
+  Just (f, sch, is, as, ss) -> do
+    let red ((g, ps) :=: e) | f == g = [(ps, e)]
+        red _ = []
+        run :: [([Pat], Syn)] -> [Tm] -> AM Syn
+        run [] ts = return $ foldl (:$) (TF (f, Hide sch) is' as') ss' where
+          (is', us) = blump is ts
+          (as', ss') = blump as us
+        run ((ps, e) : prog) ts = snarf ps ts >>= \case
+          Left ts -> run prog ts
+          Right (m, ts) -> hnfSyn $ foldl (:$) (stan m e) ts
+    prog <- foldMap red <$> gamma
     run prog (is ++ as ++ ss)
  where
-  red f ((g, ps) :=: e) | f == g = [(ps, e)]
-  red f _ = []
-  run :: [([Pat], Syn)] -> [Tm] -> AM Syn
-  run [] _ = return e
-  run ((ps, e) : prog) ts = snarf ps ts >>= \case
-    Left ts -> run prog ts
-    Right (m, ts) -> hnfSyn $ foldl (:$) (stan m e) ts
   snarf :: [Pat] -> [Tm] -> AM (Either [Tm] (Matching, [Tm]))
   snarf [] ts = return $ Right ([], ts)
   snarf (p : ps) [] = return $ Left []
@@ -79,18 +81,20 @@ hnfSyn e = case fnarg e [] of
     (t, Just m) -> snarf ps ts >>= \case
       Left ts -> return $ Left (t : ts)
       Right (m', ts) -> return $ Right (m ++ m', ts)
+  blump [] xs = ([], xs)
+  blump (_ : ys) [] = ([], [])
+  blump (_ : ys) (x : xs) = ((x :) *** id) (blump ys xs)
 
 hnfSyn' :: Syn -> AM Syn
-hnfSyn' e@(TP (x, Hide ty)) = do
-  cope
-    (nomBKind x >>= \case
+hnfSyn' e@(TP (x, Hide ty)) = cope
+  (nomBKind x >>= \case
     Defn t -> do
       t <- hnf t
       ty <- hnf ty
       return (t ::: ty)
     _ -> return e)
-    (\ _ -> return e)
-    return
+  (\ _ -> return e)
+  return
 hnfSyn' (t ::: ty) = do
   t <- hnf t
   ty <- hnf ty

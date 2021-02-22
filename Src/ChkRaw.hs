@@ -810,3 +810,16 @@ foo = unlines
   , "    given x = S x33 prove S x33 + y + z = S x33 + (y + z) tested where"
   , "      prove x33 + y + z = x33 + (y + z) given"
   ]
+
+goo = unlines
+  [ "data N = Z | S N"
+  , "(+) :: N -> N -> N"
+  , "define x + y inductively x where"
+  , "  define x + y from x where"
+  , "    define Z + y = y"
+  , "    define S x' + y = S (x' + y)"
+  , "a :: N"
+  , "b :: N"
+  , "c :: N"
+  , "test (S a + b) + c"
+  ]

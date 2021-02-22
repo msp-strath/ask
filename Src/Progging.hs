@@ -66,7 +66,7 @@ dubStep p f as = do
   push ImplicitQuantifier
   (e, ty) <- elabSyn f as
   lox <- doorStep
-  z@(f, is, ss, as) <- mayhem $ fnarg e []
+  z@(f, _, is, ss, as) <- mayhem $ fnarg e []
   True <- trade ("FNARG " ++ show z) $ return True
   guard $ f == fNom p
   p <- tro lox as (leftAppl p) p
