@@ -769,7 +769,5 @@ foo = unlines
   , "  define x + y from x where"
   , "    define Z + y = y"
   , "    define S x' + y = S (x' + y)"
-  , "prove (x + y) + z = x + (y + z) inductively x where"
-  , "  prove (x + y) + z = x + (y + z) from x where"
-  , "    given x = S x' prove (S x' + y) + z = S x' + (y + z) tested"
+  , "prove (x + y) + z = x + (y + z) inductively x"
   ]

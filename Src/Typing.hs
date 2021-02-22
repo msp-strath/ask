@@ -392,8 +392,8 @@ unify ty a b = do  -- pay more attention to types
       guard $ f == g
       tel <- constructor ty f
       unifies tel as bs
-    (TE (TP xp), t) -> make xp t
-    (s, TE (TP yp)) -> make yp s
+    (TE (TP xp), t) -> make xp t ty
+    (s, TE (TP yp)) -> make yp s ty
     (TE e, TE f) -> () <$ unifySyn e f
     _ -> cope (equal ty (a, b))
       (\ _ -> do
@@ -402,8 +402,12 @@ unify ty a b = do  -- pay more attention to types
       return
 
 unifySyn :: Syn -> Syn -> AM Tm   --- eeeevil
-unifySyn (TP xp@(_, Hide ty)) e = ty <$ make xp (TE e)
-unifySyn e (TP xp@(_, Hide ty)) = ty <$ make xp (TE e)
+unifySyn (TP xp@(_, Hide ty)) e = do
+  ty <- eqSyn e e
+  ty <$ make xp (TE e) ty
+unifySyn e (TP xp@(_, Hide ty)) = do
+  ty <- eqSyn e e
+  ty <$ make xp (TE e) ty
 unifySyn (e :$ a) (f :$ b) = do
   ty <- unifySyn e f >>= hnf
   (dom, ran) <- makeFun ty
@@ -442,18 +446,19 @@ unifies tel as bs = prepare tel as bs >>= execute [] where
     unify (stan m s) a b
     execute ((x, a) : m) sch
 
-make :: (Nom, Hide Tm) -> Tm -> AM ()
-make (x, _) (TE (TP (y, _))) | x == y = return ()
-make (x, _) t | track ("MAKE " ++ show x ++ " = " ++ show t) False = undefined
-make xp@(x, Hide ty) t = do
+make :: (Nom, Hide Tm) -> Tm -> Tm -> AM ()
+make (x, _) (TE (TP (y, _))) got | x == y = return ()
+make (x, _) t got | track ("MAKE " ++ show x ++ " = " ++ show t) False = undefined
+make xp@(x, Hide ty) t  got = do
   nomBKind x >>= \case
     User _ -> case t of
       TE (TP yp@(y, _)) -> nomBKind y >>= \case
-        Hole -> make yp (TE (TP xp))
+        Hole -> make yp (TE (TP xp)) ty
         _ -> gripe FAIL
       _ -> gripe FAIL
     Defn s -> unify ty s t
     Hole -> do
+      subtype got ty 
       ga <- gamma
       ga <- go ga []
       setGamma ga
