@@ -28,7 +28,7 @@ import Ask.Src.Printing
 import Ask.Src.HardwiredRules
 import Ask.Src.Progging
 
-tracy = const id
+tracy = trace
 
 type Anno =
   ( Status
@@ -679,21 +679,24 @@ discharge zs t = go [] zs t where
   go sg (_ : zs) t = go sg zs t
 
 askRawDecl :: (RawDecl, [LexL]) -> AM String
-askRawDecl (RawProof (Make Prf gr mr () ps src), ls) = do
-  doorStop
+askRawDecl (RawProof (Make Prf gr mr () ps src), ls) = id <$
+  doorStop <*>
   cope (do
-    g <- impQElabTm Prop gr
-    gt <- mayhem $ my g
-    p <- bifoldMap id (($ "") . rfold lout) <$> 
-        (chkProof g mr ps src >>= pout (Denty 1))
-    de <- doorStep
-    push . Hyp $ discharge de gt
-    return p)
+      g <- impQElabTm Prop gr
+      gt <- mayhem $ my g
+      de <- doorStep
+      let claim = discharge de gt
+      doorStop
+      traverse push de
+      p <- bifoldMap id (($ "") . rfold lout) <$> 
+          (chkProof g mr ps src >>= pout (Denty 1))
+      pushOutDoor . Hyp $ claim
+      return p)
     (\ gr -> do
-      doorStep
       e <- ppGripe gr
       return $ "{- " ++ e ++ "\n" ++ rfold lout ls "\n-}")
     return
+  <* doorStep
 askRawDecl (RawProof (Make Def gr@(_, (_, _, f) :$$ as) mr () ps src), ls) = id
   <$ doorStop
   <*> cope (do
@@ -846,7 +849,9 @@ hoo = unlines
   , "  define x + y from x where"
   , "    define Z + y = y"
   , "    define S x' + y = S (x' + y)"
-  , "prove x + Z = x ?"
+  , "prove x + Z = x inductively x where"
+  , "  prove x + Z = x from x where"
+  , "    given x = S x' prove S x' + Z = S x' tested"
   , "prove y + Z = y given"
   ]
   

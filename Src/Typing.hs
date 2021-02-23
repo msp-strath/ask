@@ -33,7 +33,7 @@ import Ask.Src.Tm
 import Ask.Src.Glueing
 import Ask.Src.Context
 
-track = const id
+track = trace
 
 
 ------------------------------------------------------------------------------
