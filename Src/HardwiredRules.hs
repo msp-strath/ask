@@ -55,6 +55,11 @@ myWeirdRules =
   [ (PM "x" mempty, ("Contradiction", Pr [])) :<=
     [ GIVEN (TC "Not" [TM "x" []]) $ PROVE FALSE
     ]
+  , (PC "=" [PM "T" mempty, PM "r" mempty, PM "t" mempty],
+     ("Route", ("s", TM "T" mempty) :*: Pr [])) :<=
+    [ PROVE $ TC "=" [TM "T" [], TM "r" [], TM "s" []]
+    , PROVE $ TC "=" [TM "T" [], TM "s" [], TM "t" []]
+    ]
   ]
 
 myContext :: Context

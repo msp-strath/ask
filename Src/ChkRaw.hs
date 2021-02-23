@@ -674,8 +674,11 @@ askRawDecl (RawProof (Make Prf gr mr () ps src), ls) = id
   <$ doorStop
   <*> cope (do
       g <- impQElabTm Prop gr
-      bifoldMap id (($ "") . rfold lout) <$> 
-        (chkProof g mr ps src >>= pout (Denty 1)))
+      gt <- mayhem $ my g
+      p <- bifoldMap id (($ "") . rfold lout) <$> 
+        (chkProof g mr ps src >>= pout (Denty 1))
+      pushOutDoor (Hyp gt)
+      return p)
     (\ gr -> do
       e <- ppGripe gr
       return $ "{- " ++ e ++ "\n" ++ rfold lout ls "\n-}")
@@ -769,7 +772,7 @@ coo = unlines
   , "  define x + y from x where"
   , "    define Z + y = y"
   , "    define S x' + y = S (x' + y)"
-  , "prove (x + y) + z = x + (y + z) inductively x"
+  , "prove (x + y) + z = x + (y + z) by Route Z"
   ]
 
 doo :: String
