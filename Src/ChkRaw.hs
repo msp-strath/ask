@@ -76,8 +76,10 @@ chkProg p gr mr ps src@(h,b) = do
       a@(Our t _) <- elabTmR (rightTy p) a
       True <- tracy ("IS SO " ++ show t) $ return True
       (PC _ ps, sb) <- patify $ TC "" (map fst (leftImpl p ++ leftSatu p ++ leftAppl p))
-      doorStep
-      pushOutDoor $ (fNom p, ps) :=: rfold e4p sb (t ::: rightTy p)
+      True <- tracy ("PATIFIED " ++ show ps ++ show sb) $ return True
+      de <- doorStep
+      pushOutDoor $ (fNom p, ps) :=:
+        rfold e4p sb (discharge de t ::: discharge de (rightTy p))
       pure (Is a)
     From a@(_, ((_, _, x) :$$ as)) -> do
       doorStop
@@ -234,15 +236,25 @@ chkSubProofs ps = do
     $ \ _ -> return $ (g :-/ (True, p) :-\ qs)
   covers :: Subgoal -> SubMake Anno TmR -> AM ()
   covers sg sp = do
-    True <- tracy ("COVERS: " ++ show sg ++ " ? " ++ show sp) $ return True
+    doorStop
+    True <- tracy ("COVERS: " ++ show sg ++ " ?\n" ++ show sp) $ return True
     go sg sp
+    True <- tracy ("HAPPY: " ++ show sg ++ " ?\n" ++ show sp) $ return True
+    doorStep
+    return ()
    where
     go t ((_, (_, hs)) ::- Make Prf g m (Keep, _) _ _) = subgoal t $ \ t -> do
       g <- mayhem $ my g
       traverse smegUp (g : [h | Given x <- hs, Just h <- [my x]])
       traverse ensure hs
       True <- tracy ("COVERS " ++ show (g, t)) $ return True
-      unify Prop g t
+      cope (unify Prop g t)
+        (\ gr -> do
+          True <- tracy "NOPE" $ return True
+          gripe gr)
+        return
+      True <- tracy "YEP" $ return True        
+      return ()
     go _ _ = gripe FAIL
     ensure (Given h) = mayhem (my h) >>= given
   squish :: (Bool, SubMake Anno TmR) -> SubMake Anno TmR
@@ -785,7 +797,6 @@ foo = unlines
   , "    define Empty ++ ys = ys"
   , "    define (x : xs') ++ ys = x : (xs' ++ ys)"
   , "prove xs ++ Empty = xs inductively xs where"
-  , "  prove xs ++ Empty = xs from xs"
   , "  prove xs ++ Empty = xs from xs where"
   , "    given xs = x : xs' prove (x : xs') ++ Empty = x : xs' tested"
   ]
