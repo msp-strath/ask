@@ -777,81 +777,27 @@ filthier as s = case runAM go () as of
     setFixities fo
     bifoldMap (($ "") . rfold lout) id <$> traverse askRawDecl b
 
-coo :: String
-coo = unlines
-  [ "data N = Z | S N"
-  , "(+) :: N -> N -> N"
-  , "define x + y inductively x where"
-  , "  define x + y from x where"
-  , "    define Z + y = y"
-  , "    define S x' + y = S (x' + y)"
-  , "prove (x + y) + z = x + (y + z) inductively x"
-  ]
-
-doo :: String
-doo = unlines
-  [ "data N = Z | S N"
-  , "(+) :: N -> N -> N"
-  , "define x + y inductively x where"
-  , "  define x + y from x where"
-  , "    define Z + y = y"
-  , "    define S x' + y = S (x' + y)"
-  , "prove (x + y) + z = x + (y + z) inductively x where"
-  , "  prove x + y + z = x + (y + z) from x"
-  ]
-
-eoo :: String
-eoo = unlines
-  [ "data N = Z | S N"
-  , "(+) :: N -> N -> N"
-  , "define x + y inductively x where"
-  , "  define x + y from x where"
-  , "    define Z + y = y"
-  , "    define S x' + y = S (x' + y)"
-  , "prove (x + y) + z = x + (y + z) inductively x where"
-  , "  prove x + y + z = x + (y + z) from x where"
-  , "    given x = S x33 prove S x33 + y + z = S x33 + (y + z) tested"
-  ]
-
-foo :: String
 foo = unlines
-  [ "data N = Z | S N"
-  , "(+) :: N -> N -> N"
-  , "define x + y inductively x where"
-  , "  define x + y from x where"
-  , "    define Z + y = y"
-  , "    define S x' + y = S (x' + y)"
-  , "prove (x + y) + z = x + (y + z) inductively x where"
-  , "  prove x + y + z = x + (y + z) from x where"
-  , "    given x = S x33 prove S x33 + y + z = S x33 + (y + z) tested where"
-  , "      prove x33 + y + z = x33 + (y + z) given"
+  [ "data List x = Empty | x : List x"
+  , "(++) :: List x -> List x -> List x"
+  , "define xs ++ ys inductively xs where"
+  , "  define xs ++ ys from xs where"
+  , "    define Empty ++ ys = ys"
+  , "    define (x : xs') ++ ys = x : (xs' ++ ys)"
+  , "prove xs ++ Empty = xs inductively xs where"
+  , "  prove xs ++ Empty = xs from xs"
+  , "  prove xs ++ Empty = xs from xs where"
+  , "    given xs = x : xs' prove (x : xs') ++ Empty = x : xs' tested"
   ]
 
-goo :: String
 goo = unlines
-  [ "data N = Z | S N"
-  , "(+) :: N -> N -> N"
-  , "define x + y inductively x where"
-  , "  define x + y from x where"
-  , "    define Z + y = y"
-  , "    define S x' + y = S (x' + y)"
-  , "a :: N"
-  , "b :: N"
-  , "c :: N"
-  , "test (S a + b) + c"
+  [ "data Tree = Leaf | Node Tree Tree"
+  , "mirror :: Tree -> Tree"
+  , "define mirror t inductively t where"
+  , "  define mirror t from t where"
+  , "    define mirror Leaf = Leaf"
+  , "    define mirror (Node l r) = Node (mirror r) (mirror l)"
+  , "prove mirror (mirror t) = t inductively t where"
+  , "  prove mirror (mirror t) = t from t where"
+  , "    given t = Node l r prove mirror (mirror (Node l r)) = Node l r tested"
   ]
-
-hoo :: String
-hoo = unlines
-  [ "data N = Z | S N"
-  , "(+) :: N -> N -> N"
-  , "define x + y inductively x where"
-  , "  define x + y from x where"
-  , "    define Z + y = y"
-  , "    define S x' + y = S (x' + y)"
-  , "prove x + Z = x inductively x where"
-  , "  prove x + Z = x from x where"
-  , "    given x = S x' prove S x' + Z = S x' tested"
-  , "prove y + Z = y given"
-  ]
-  

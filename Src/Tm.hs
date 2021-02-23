@@ -284,10 +284,13 @@ instance Stan Sch where
 instance Stan Subgoal where
   stan ms (PROVE g)   = PROVE (stan ms g)
   stan ms (GIVEN h g) = GIVEN (stan ms h) (stan ms g)
+  stan ms (EVERY t b) = EVERY (stan ms t) (stan ms b)
   sbst u es (PROVE g)   = PROVE (sbst u es g)
   sbst u es (GIVEN h g) = GIVEN (sbst u es h) (sbst u es g)
+  sbst u es (EVERY t b) = EVERY (sbst u es t) (sbst u es b)
   abst x i (PROVE g) = PROVE <$> abst x i g
   abst x i (GIVEN h g) = GIVEN <$> abst x i h <*> abst x i g
+  abst x i (EVERY t b) = EVERY <$> abst x i t <*> abst x i b
 
 instance Stan () where stan _ _ = () ; sbst _ _ _ = () ; abst _ _ _ = pure ()
 
