@@ -28,7 +28,7 @@ import Ask.Src.Printing
 import Ask.Src.HardwiredRules
 import Ask.Src.Progging
 
-tracy = trace
+tracy = const id
 
 type Anno =
   ( Status
