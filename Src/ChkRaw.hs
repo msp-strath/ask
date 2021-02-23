@@ -183,8 +183,8 @@ chkProof g m ps src = do
           return $ Ind xs
         MGiven -> hnf gt >>= \case
           TC "=" [ty, lhs, rhs] ->
-            MGiven <$ (given (TC "=" [ty, lhs, rhs])
-                       <|> given (TC "=" [ty, rhs, lhs]))
+            MGiven <$ (given (TC "=" [ty, rhs, lhs])
+                       <|> given (TC "=" [ty, lhs, rhs]))
           _ -> MGiven <$ given gt
         Tested b -> hnf gt >>= \case
           TC "=" [ty, lhs, rhs] -> Tested b <$ tested ty lhs rhs
@@ -669,21 +669,31 @@ chkTest (ls, (_,_,f) :$$ as) mv = do
       r <- ppTm AllOK v
       return . ("tested " ++) . rfold lout ls . (" = " ++) $ r
 
+
+discharge :: [CxE] -> Tm -> Tm
+discharge zs t = go [] zs t where
+  go sg [] t = rfold e4p sg t
+  go sg (Bind (nom, Hide ty) k : zs) t = case k of
+    Defn s -> go ((nom, rfold e4p sg (s ::: ty)) : sg) zs t
+    _      -> go ((nom, TP (nom, Hide (rfold e4p sg ty))) : sg) zs t
+  go sg (_ : zs) t = go sg zs t
+
 askRawDecl :: (RawDecl, [LexL]) -> AM String
-askRawDecl (RawProof (Make Prf gr mr () ps src), ls) = id
-  <$ doorStop
-  <*> cope (do
-      g <- impQElabTm Prop gr
-      gt <- mayhem $ my g
-      p <- bifoldMap id (($ "") . rfold lout) <$> 
+askRawDecl (RawProof (Make Prf gr mr () ps src), ls) = do
+  doorStop
+  cope (do
+    g <- impQElabTm Prop gr
+    gt <- mayhem $ my g
+    p <- bifoldMap id (($ "") . rfold lout) <$> 
         (chkProof g mr ps src >>= pout (Denty 1))
-      pushOutDoor (Hyp gt)
-      return p)
+    de <- doorStep
+    push . Hyp $ discharge de gt
+    return p)
     (\ gr -> do
+      doorStep
       e <- ppGripe gr
       return $ "{- " ++ e ++ "\n" ++ rfold lout ls "\n-}")
     return
-  <* doorStep
 askRawDecl (RawProof (Make Def gr@(_, (_, _, f) :$$ as) mr () ps src), ls) = id
   <$ doorStop
   <*> cope (do
@@ -772,7 +782,7 @@ coo = unlines
   , "  define x + y from x where"
   , "    define Z + y = y"
   , "    define S x' + y = S (x' + y)"
-  , "prove (x + y) + z = x + (y + z) by Route Z"
+  , "prove (x + y) + z = x + (y + z) inductively x"
   ]
 
 doo :: String
@@ -814,6 +824,7 @@ foo = unlines
   , "      prove x33 + y + z = x33 + (y + z) given"
   ]
 
+goo :: String
 goo = unlines
   [ "data N = Z | S N"
   , "(+) :: N -> N -> N"
@@ -826,3 +837,16 @@ goo = unlines
   , "c :: N"
   , "test (S a + b) + c"
   ]
+
+hoo :: String
+hoo = unlines
+  [ "data N = Z | S N"
+  , "(+) :: N -> N -> N"
+  , "define x + y inductively x where"
+  , "  define x + y from x where"
+  , "    define Z + y = y"
+  , "    define S x' + y = S (x' + y)"
+  , "prove x + Z = x ?"
+  , "prove y + Z = y given"
+  ]
+  
