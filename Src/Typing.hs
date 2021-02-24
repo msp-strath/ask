@@ -523,7 +523,7 @@ instance PDep t => PDep (Bind t) where
   pDep x (L t) = pDep x t
 
 instance PDep CxE where
-  pDep x (Hyp p) = pDep x p
+  pDep x (Hyp _ p) = pDep x p
   pDep x (Bind (_, Hide ty) k) = (||) <$> pDep x ty <*> pDep x k
   pDep _ _ = return False
 

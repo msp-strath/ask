@@ -95,10 +95,10 @@ chkProg p gr mr ps src@(h,b) = do
       push (Expect p)
       pure $ Ind xs
     _ -> gripe FAIL
-  ns <- chkSubProofs ps
+  (ns, b) <- chkSubProofs ps
   pop $ \case {ExpectBlocker -> True; _ -> False}
   let defined = case m of {Stub _ -> False; _ -> all happy ns}
-  return $ Make Def (Your gr) m (Keep, defined) ns src
+  return $ Make Def (Your gr) m (Keep, b && defined) ns src
  where
   expect :: Nom -> Tm -> Proglem -> (Con, Tel) -> AM ()
   expect xn ty p (c, tel) = do
@@ -112,7 +112,7 @@ chkProg p gr mr ps src@(h,b) = do
     wrangle (ga :< z) = do
       (ga, sb) <- wrangle ga
       case z of
-        Hyp h -> return (ga :< Hyp (rfold e4p sb h), sb)
+        Hyp b h -> return (ga :< Hyp b (rfold e4p sb h), sb)
         Bind (yn, Hide ty) k -> do
           let yp = (yn, Hide (rfold e4p sb ty))
           return (ga :< Bind yp k, (yn, TP yp) : sb)
@@ -124,7 +124,7 @@ chkProg p gr mr ps src@(h,b) = do
       let m = [ (z, TE (TP (zn, Hide (stan m s))))
               | (z, zn, s) <- zs
               ]
-      return (foldl glom ga m <>< map Hyp (stan m hs), stan m (xz <>> []))
+      return (foldl glom ga m <>< map (Hyp True) (stan m hs), stan m (xz <>> []))
      where
       glom ga (z, TE (TP xp)) = ga :< Bind xp (User z)
       glom ga _ = ga
@@ -191,9 +191,9 @@ chkProof g m ps src = do
         Tested b -> hnf gt >>= \case
           TC "=" [ty, lhs, rhs] -> Tested b <$ tested ty lhs rhs
           _ -> gripe $ TestNeedsEq gt
-      ns <- chkSubProofs ps
+      (ns, b) <- chkSubProofs ps
       let proven = case m of {Stub _ -> False; _ -> all happy ns}
-      return $ Make Prf g m (Keep, proven) ns src
+      return $ Make Prf g m (Keep, b && proven) ns src
     Nothing -> return $ Make Prf g (fmap Your m) (Junk Mardiness, True)
       (fmap subPassive ps) src
 
@@ -209,14 +209,15 @@ happy _ = True
 -- not form part of the cover
 chkSubProofs
   :: Bloc (SubMake () Appl)         -- subproofs coming from user
-  -> AM (Bloc (SubMake Anno TmR))   -- reconstruction
+  -> AM (Bloc (SubMake Anno TmR)
+         , Bool {-no hidden deps-})   -- reconstruction
 chkSubProofs ps = do
   ss <- demands
   (qs, us) <- traverse (validSubProof ss) ps >>= cover ss
   True <- tracy ("COVER " ++ show (qs, us)) $ return True
   eps <- gamma >>= sprog
-  vs <- extra us
-  return $ glom (fmap squish qs) (eps ++ vs)
+  (vs, b) <- extra us
+  return (glom (fmap squish qs) (eps ++ vs), b)
  where
   cover
     :: [Subgoal]  -- subgoals to cover
@@ -300,20 +301,25 @@ chkSubProofs ps = do
         dubd xn (Bind (yn, _) (User y)) | xn == yn = [y]
         dubd xn _ = []
 
-  extra :: [Subgoal] -> AM [SubMake Anno TmR]
-  extra [] = return []
+  extra :: [Subgoal] -> AM ([SubMake Anno TmR], Bool)
+  extra [] = return ([], True)
   extra (u : us) = cope (subgoal u obvious)
-    (\ _ -> (:) <$> need u <*> extra us)
-    $ \ _ -> extra us
+    (\ _ -> do
+      u <- need u
+      (us, b') <- extra us
+      return (u : us, False))
+    $ \ b -> do
+      (us, b') <- extra us
+      return (us, b && b')
   obvious s@(TC "=" [ty, lhs, rhs])
     =   given s
     <|> given (TC "=" [ty, rhs, lhs])
-    <|> equal ty (lhs, rhs)
+    <|> True <$ equal ty (lhs, rhs)
     <|> given FALSE
   obvious s
     =   given s
     <|> given FALSE
-    <|> equal Prop (s, TRUE)
+    <|> True <$ equal Prop (s, TRUE)
             
   need (PROVE g) = return $
     ([], ([], [])) ::- Make Prf (My g) (Stub True) (Need, False)
@@ -700,9 +706,9 @@ askRawDecl (RawProof (Make Prf gr mr () ps src), ls) = id <$
       let claim = discharge de gt
       doorStop
       traverse push de
-      p <- bifoldMap id (($ "") . rfold lout) <$> 
-          (chkProof g mr ps src >>= pout (Denty 1))
-      pushOutDoor . Hyp $ claim
+      prf <- chkProof g mr ps src
+      p <- bifoldMap id (($ "") . rfold lout) <$> pout (Denty 1) prf
+      pushOutDoor . Hyp (snd (annotation prf)) $ claim
       return p)
     (\ gr -> do
       e <- ppGripe gr
@@ -823,4 +829,17 @@ hoo = unlines
   , "prove (xs ++ ys) ++ zs = xs ++ (ys ++ zs) inductively xs where"
   , "  prove (xs ++ ys) ++ zs = xs ++ (ys ++ zs) from xs where"
   , "    given xs = x : xs' prove ((x : xs') ++ ys) ++ zs = (x : xs') ++ (ys ++ zs) tested"
+  ]
+
+ioo = unlines
+  [ "data N = Z | S N"
+  , "(+) :: N -> N -> N"
+  , "defined x + y inductively x where"
+  , "  defined x + y from x where"
+  , "    defined Z + y = y"
+  , "    defined S x + y = S (x + y)"
+  , "prove (x + y) + z = x + (y + z) inductively x where"
+  , "  prove (x + y) + z = x + (y + z) from x where"
+  , "    given x = S x' prove (S x' + y) + z = S x' + (y + z)"
+  , "      tested"
   ]

@@ -56,16 +56,17 @@ invert hyp = fold <$> (gamma >>= traverse try )
     (\ m -> return [((h, stan m tel), stan m prems)])
   try _ = return []
 
-given :: Tm -> AM ()
+given :: Tm -> AM Bool{-proven?-}
 given goal = do
   ga <- gamma
   True <- trice ("GIVEN: " ++ show goal ++ " from?\n" ++
-             show (filter (\case {Bind _ _ -> True; Hyp _ -> True; _ -> False}) (ga <>> [])))
+             show (filter (\case {Bind _ _ -> True; Hyp _ _ -> True; _ -> False})
+             (ga <>> [])))
            $ return True
   go ga
  where
   go B0 = gripe $ NotGiven goal
-  go (ga :< Hyp hyp) = cope (do
+  go (ga :< Hyp b hyp) = cope (do
     True <- trice ("TRYING " ++ show hyp) $ return True
     doorStop
     smegUp hyp
@@ -74,7 +75,7 @@ given goal = do
       return
     doorStep
     True <- trice "BINGO" $ return True    
-    return ()
+    return b
     )
     (\ gr -> go ga) return
   go (ga :< _) = go ga
@@ -103,10 +104,10 @@ smegDown _ = return ()
 
 (|-) :: Tm -> AM x -> AM x
 h |- p = do
-  push (Hyp h)
+  push (Hyp True h)
   x <- p
   pop $ \case
-    Hyp _ -> True
+    Hyp _ _ -> True
     _ -> False
   return x
 
