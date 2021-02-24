@@ -708,7 +708,10 @@ askRawDecl (RawProof (Make Prf gr mr () ps src), ls) = id <$
       traverse push de
       prf <- chkProof g mr ps src
       p <- bifoldMap id (($ "") . rfold lout) <$> pout (Denty 1) prf
-      pushOutDoor . Hyp (snd (annotation prf)) $ claim
+      let nailed = case annotation prf of
+            (Keep, True) -> True
+            _ -> False
+      pushOutDoor . Hyp nailed $ claim
       return p)
     (\ gr -> do
       e <- ppGripe gr
