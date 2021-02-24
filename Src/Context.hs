@@ -32,7 +32,7 @@ import Ask.Src.RawAsk
 type Context = Bwd CxE
 
 data CxE -- what sort of thing is in the context?
-  = Hyp Tm
+  = Hyp Bool{-proven?-} Tm
   | Bind (Nom, Hide Tm) BKind
   | (Nom, [Pat]) :=: Syn  -- computation rule
   | Declare String Nom Sch

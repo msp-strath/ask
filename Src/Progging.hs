@@ -154,7 +154,7 @@ inductively p@(Proglem de f u li ls la ty) xs = do
       mark (ga :< z) = do
         (sb, ga) <- mark ga
         case z of
-          Hyp h -> return (sb, ga :< Hyp (rfold e4p sb h))
+          Hyp b h -> return (sb, ga :< Hyp b (rfold e4p sb h))
           Bind (yn, Hide ty) k -> do
             let yp = (yn, Hide (rfold e4p sb ty))
             return ((yn, TP yp) : sb, ga :< Bind yp k)
@@ -196,7 +196,7 @@ indPrf g xs = do
   push $ Bind nonp (User "")
   bg <- bigg xs nont [] de g
   wg <- weeg xs nont [] de g
-  push $ Hyp wg
+  push $ Hyp True wg
   demand $ PROVE bg
   ga <- gamma
   True <- trade ("INDPRF: " ++ show ga) $ return True
