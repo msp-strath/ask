@@ -163,37 +163,37 @@ chkProof g m ps src = do
     (fmap subPassive ps) src
   go = case my g of
     Just gt -> do
-      m <- case m of
-        Stub b -> pure $ Stub b
-        By r -> By <$> (gt `by` r)
+      (m, b0) <- case m of
+        Stub b -> pure $ (Stub b, False)
+        By r -> (,True) <$> By <$> (gt `by` r)
         From h@(_, (t, _, _) :$$ _)
           | elem t [Uid, Sym] -> do
             ht <- elabTm Prop h
             demand (PROVE ht)
             fromSubs gt ht
-            return (From (Our ht h))
+            return (From (Our ht h), True)
         From h@(_, (Lid, _, x) :$$ []) -> what's x >>= \case
           Right (e@(TP xp), ty) -> do
             ty <- hnf ty
             cts <- conSplit ty
-            From (Our (TE e) h) <$
+            (From (Our (TE e) h), True) <$
               traverse (splitProof xp ty gt) cts
           _ -> gripe $ FromNeedsConnective h
         From h -> gripe $ FromNeedsConnective h
         Ind xs -> do
           indPrf gt xs
-          return $ Ind xs
+          return $ (Ind xs, True)
         MGiven -> hnf gt >>= \case
           TC "=" [ty, lhs, rhs] ->
-            MGiven <$ (given (TC "=" [ty, rhs, lhs])
+            (MGiven,) <$> (given (TC "=" [ty, rhs, lhs])
                        <|> given (TC "=" [ty, lhs, rhs]))
-          _ -> MGiven <$ given gt
+          _ -> (MGiven,) <$> given gt
         Tested b -> hnf gt >>= \case
-          TC "=" [ty, lhs, rhs] -> Tested b <$ tested ty lhs rhs
+          TC "=" [ty, lhs, rhs] -> (Tested b, True) <$ tested ty lhs rhs
           _ -> gripe $ TestNeedsEq gt
-      (ns, b) <- chkSubProofs ps
+      (ns, b1) <- chkSubProofs ps
       let proven = case m of {Stub _ -> False; _ -> all happy ns}
-      return $ Make Prf g m (Keep, b && proven) ns src
+      return $ Make Prf g m (Keep, b0 && b1 && proven) ns src
     Nothing -> return $ Make Prf g (fmap Your m) (Junk Mardiness, True)
       (fmap subPassive ps) src
 
