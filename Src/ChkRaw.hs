@@ -812,3 +812,15 @@ goo = unlines
   , "  prove mirror (mirror t) = t from t where"
   , "    given t = Node l r prove mirror (mirror (Node l r)) = Node l r tested"
   ]
+
+hoo = unlines
+  [ "data List x = Empty | x : List x"
+  , "(++) :: List x -> List x -> List x"
+  , "define xs ++ ys inductively xs where"
+  , "  define xs ++ ys from xs where"
+  , "    define Empty ++ ys = ys"
+  , "    define (x : xs') ++ ys = x : (xs' ++ ys)"
+  , "prove (xs ++ ys) ++ zs = xs ++ (ys ++ zs) inductively xs where"
+  , "  prove (xs ++ ys) ++ zs = xs ++ (ys ++ zs) from xs where"
+  , "    given xs = x : xs' prove ((x : xs') ++ ys) ++ zs = (x : xs') ++ (ys ++ zs) tested"
+  ]

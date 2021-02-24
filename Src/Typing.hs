@@ -460,7 +460,9 @@ make xp@(x, Hide ty) t  got = do
         Hole -> make yp (TE (TP xp)) ty
         _ -> gripe FAIL
       _ -> gripe FAIL
-    Defn s -> unify ty s t
+    Defn s -> do
+      True <- track ("BUT " ++ show x ++ " = " ++ show s) $ return True
+      unify ty s t
     Hole -> do
       got <- case t of
         TE e -> eqSyn e e
@@ -471,7 +473,9 @@ make xp@(x, Hide ty) t  got = do
       True <- track "MADE" $ return True
       setGamma ga
  where
-  go B0 ms = gripe FAIL -- shouldn't happen
+  go B0 ms = do
+    True <- track ("AWOL " ++ show x) $ return True
+    gripe FAIL -- shouldn't happen
   go (ga :< Bind p@(y, _) Hole) ms | x == y = do
     pDep y (ms, t) >>= \case
       True -> gripe FAIL
