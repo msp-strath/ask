@@ -188,57 +188,67 @@ chkIsData de x = case foldMap spot de of
 
 indPrf :: Tm -> [String] -> AM ()
 indPrf g xs = do
+  de <- doorStep
+  doorStop
   non <- fresh "" -- make a nonce
   let nonp = (non, Hide Zone)
   let nont = TE (TP nonp)
-  ((ws, wg), (bs, bg)) <- qpr xs nont (([], g), ([], g))
   push $ Bind nonp (User "")
-  traverse (\ (xp, u) -> push $ Bind xp (User u)) bs
+  bg <- bigg xs nont [] de g
+  wg <- weeg xs nont [] de g
   push $ Hyp wg
   demand $ PROVE bg
   ga <- gamma
   True <- trade ("INDPRF: " ++ show ga) $ return True
   return ()
 
-qpr :: [String] -- inductively what?
-    -> Tm       -- size zone
-    -> ( ([(Nom, (Nom, Hide Tm))], Tm)
-       , ([((Nom, Hide Tm), String)], Tm)
-       )  -- wees, bigs
-    -> AM  ( ([(Nom, (Nom, Hide Tm))], Tm)
-           , ([((Nom, Hide Tm), String)], Tm)
-           )  -- wees, bigs
-qpr xs z v@((ws, wg), (bs, bg)) = pop (const True) >>= \case
-  Nothing -> gripe Mardiness
-  Just DoorStop -> case xs of
-    [] -> v <$ push DoorStop
-    x : _ -> gripe $ Scope x
-  Just (Bind yp@(yn, Hide ty) (User y)) -> case partition (y ==) xs of
+weeg :: [String]     -- inductively what?
+     -> Tm           -- size zone
+     -> [(Nom, Syn)] -- substitution
+     -> [CxE]        -- quantifier prefix
+     -> Tm           -- goal
+     -> AM Tm        -- inductive hypothesis
+weeg xs z sb [] g = case xs of
+  x : _ -> gripe $ Scope x
+  [] -> return (rfold e4p sb g)
+weeg xs z sb (Bind (nom, Hide ty) k : de) g = case k of
+  Defn tm  -> weeg xs z ((nom, rfold e4p sb (tm ::: ty)) : sb) de g
+  Hole     -> weeg xs z ((nom, TP (nom, Hide (rfold e4p sb ty))) : sb) de g
+  User x ->  case partition (x ==) xs of
     ([], _) -> do
-      ty <- norm ty
-      wyn <- fresh y
-      let wy = (wyn, Hide ty)
-      qpr xs z
-        ( ((yn, wy) : map (id *** (id *** e4p (yn, TP wy))) ws, e4p (yn, TP wy) wg)
-        , ((yp, y) : bs, bg)
-        )
-    (_, xs) -> hnf ty >>= \ ty -> case ty of
+      yn <- fresh x
+      weeg xs z ((nom, TP (yn,  Hide (rfold e4p sb ty))) : sb) de g
+    (_, xs) -> hnf (rfold e4p sb ty) >>= \ ty -> case ty of
       TC d ss -> do
-        wyn <- fresh y
         cope (isDataType d) (\ _ -> gripe $ NotADataType ty) return
-        let wy = (wyn, Hide (TC "$" [ty, z, TC "S" [TC "Z" []]]))
-        let by = (yn, Hide (TC "$" [ty, z, TC "Z" []]))
-        qpr xs z
-          ( ((yn, wy) : map (id *** (id *** e4p (yn, TP wy))) ws, e4p (yn, TP wy) wg)
-          , ((by, y) : map ((id *** e4p (yn, TP by)) *** id) bs, e4p (yn, TP by) bg)
-          )
-  Just (Bind (yn, Hide ty) (Defn tm)) -> qpr xs z
-    ( (map (id *** (id *** e4p (yn, tm ::: ty))) ws, e4p (yn, tm ::: ty) wg)
-    , (map ((id *** e4p (yn, tm ::: ty)) *** id) bs, e4p (yn, tm ::: ty) bg)
-    )
-  Just (Bind yp@(yn, Hide ty) Hole) -> qpr xs z
-    ( (ws, wg)
-    , ((yp, "") : bs, bg)
-    )
-  _ -> qpr xs z v
-        
+        yn <- fresh x
+        weeg xs z ((nom, TP (yn, Hide (Sized ty z (Weer Big)))) : sb) de g
+      _ -> gripe $ NotADataType ty
+
+bigg :: [String]     -- inductively what?
+     -> Tm           -- size zone
+     -> [(Nom, Syn)] -- substitution
+     -> [CxE]        -- quantifier prefix
+     -> Tm           -- goal
+     -> AM Tm        -- inductive hypothesis
+bigg xs z sb [] g = case xs of
+  x : _ -> gripe $ Scope x
+  [] -> return $ rfold e4p sb g
+bigg xs z sb (Bind (nom, Hide ty) k : de) g = case k of
+  Defn tm  -> bigg xs z ((nom, rfold e4p sb (tm ::: ty)) : sb) de g
+  Hole     -> do
+    let xp = (nom, Hide (rfold e4p sb ty))
+    push $ Bind xp Hole
+    bigg xs z ((nom, TP xp) : sb) de g
+  User x ->  case partition (x ==) xs of
+    ([], _) -> do
+      let xp = (nom, Hide (rfold e4p sb ty))
+      push $ Bind xp (User x)
+      bigg xs z ((nom, TP xp) : sb) de g
+    (_, xs) -> hnf (rfold e4p sb ty) >>= \ ty -> case ty of
+      TC d ss -> do
+        cope (isDataType d) (\ _ -> gripe $ NotADataType ty) return
+        let xp = (nom, Hide (Sized (rfold e4p sb ty) z Big))
+        push $ Bind xp (User x)
+        bigg xs z ((nom, TP xp) : sb) de g
+      _ -> gripe $ NotADataType ty

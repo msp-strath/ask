@@ -57,11 +57,24 @@ invert hyp = fold <$> (gamma >>= traverse try )
   try _ = return []
 
 given :: Tm -> AM ()
-given goal = gamma >>= go where
+given goal = do
+  ga <- gamma
+  True <- trice ("GIVEN: " ++ show goal ++ " from?\n" ++
+             show (filter (\case {Bind _ _ -> True; Hyp _ -> True; _ -> False}) (ga <>> [])))
+           $ return True
+  go ga
+ where
   go B0 = gripe $ NotGiven goal
   go (ga :< Hyp hyp) = cope (do
+    True <- trice ("TRYING " ++ show hyp) $ return True
+    doorStop
     smegUp hyp
-    unify (TC "Prop" []) hyp goal
+    cope (unify (TC "Prop" []) hyp goal)
+      (\ gr -> trice "OOPS" $ gripe gr)
+      return
+    doorStep
+    True <- trice "BINGO" $ return True    
+    return ()
     )
     (\ gr -> go ga) return
   go (ga :< _) = go ga

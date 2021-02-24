@@ -76,8 +76,10 @@ chkProg p gr mr ps src@(h,b) = do
       a@(Our t _) <- elabTmR (rightTy p) a
       True <- tracy ("IS SO " ++ show t) $ return True
       (PC _ ps, sb) <- patify $ TC "" (map fst (leftImpl p ++ leftSatu p ++ leftAppl p))
-      doorStep
-      pushOutDoor $ (fNom p, ps) :=: rfold e4p sb (t ::: rightTy p)
+      True <- tracy ("PATIFIED " ++ show ps ++ show sb) $ return True
+      de <- doorStep
+      pushOutDoor $ (fNom p, ps) :=:
+        rfold e4p sb (discharge de t ::: discharge de (rightTy p))
       pure (Is a)
     From a@(_, ((_, _, x) :$$ as)) -> do
       doorStop
@@ -183,8 +185,8 @@ chkProof g m ps src = do
           return $ Ind xs
         MGiven -> hnf gt >>= \case
           TC "=" [ty, lhs, rhs] ->
-            MGiven <$ (given (TC "=" [ty, lhs, rhs])
-                       <|> given (TC "=" [ty, rhs, lhs]))
+            MGiven <$ (given (TC "=" [ty, rhs, lhs])
+                       <|> given (TC "=" [ty, lhs, rhs]))
           _ -> MGiven <$ given gt
         Tested b -> hnf gt >>= \case
           TC "=" [ty, lhs, rhs] -> Tested b <$ tested ty lhs rhs
@@ -234,15 +236,25 @@ chkSubProofs ps = do
     $ \ _ -> return $ (g :-/ (True, p) :-\ qs)
   covers :: Subgoal -> SubMake Anno TmR -> AM ()
   covers sg sp = do
-    True <- tracy ("COVERS: " ++ show sg ++ " ? " ++ show sp) $ return True
+    doorStop
+    True <- tracy ("COVERS: " ++ show sg ++ " ?\n" ++ show sp) $ return True
     go sg sp
+    True <- tracy ("HAPPY: " ++ show sg ++ " ?\n" ++ show sp) $ return True
+    doorStep
+    return ()
    where
     go t ((_, (_, hs)) ::- Make Prf g m (Keep, _) _ _) = subgoal t $ \ t -> do
       g <- mayhem $ my g
       traverse smegUp (g : [h | Given x <- hs, Just h <- [my x]])
       traverse ensure hs
       True <- tracy ("COVERS " ++ show (g, t)) $ return True
-      unify Prop g t
+      cope (unify Prop g t)
+        (\ gr -> do
+          True <- tracy "NOPE" $ return True
+          gripe gr)
+        return
+      True <- tracy "YEP" $ return True        
+      return ()
     go _ _ = gripe FAIL
     ensure (Given h) = mayhem (my h) >>= given
   squish :: (Bool, SubMake Anno TmR) -> SubMake Anno TmR
@@ -669,13 +681,29 @@ chkTest (ls, (_,_,f) :$$ as) mv = do
       r <- ppTm AllOK v
       return . ("tested " ++) . rfold lout ls . (" = " ++) $ r
 
+
+discharge :: [CxE] -> Tm -> Tm
+discharge zs t = go [] zs t where
+  go sg [] t = rfold e4p sg t
+  go sg (Bind (nom, Hide ty) k : zs) t = case k of
+    Defn s -> go ((nom, rfold e4p sg (s ::: ty)) : sg) zs t
+    _      -> go ((nom, TP (nom, Hide (rfold e4p sg ty))) : sg) zs t
+  go sg (_ : zs) t = go sg zs t
+
 askRawDecl :: (RawDecl, [LexL]) -> AM String
-askRawDecl (RawProof (Make Prf gr mr () ps src), ls) = id
-  <$ doorStop
-  <*> cope (do
+askRawDecl (RawProof (Make Prf gr mr () ps src), ls) = id <$
+  doorStop <*>
+  cope (do
       g <- impQElabTm Prop gr
-      bifoldMap id (($ "") . rfold lout) <$> 
-        (chkProof g mr ps src >>= pout (Denty 1)))
+      gt <- mayhem $ my g
+      de <- doorStep
+      let claim = discharge de gt
+      doorStop
+      traverse push de
+      p <- bifoldMap id (($ "") . rfold lout) <$> 
+          (chkProof g mr ps src >>= pout (Denty 1))
+      pushOutDoor . Hyp $ claim
+      return p)
     (\ gr -> do
       e <- ppGripe gr
       return $ "{- " ++ e ++ "\n" ++ rfold lout ls "\n-}")
@@ -761,65 +789,38 @@ filthier as s = case runAM go () as of
     setFixities fo
     bifoldMap (($ "") . rfold lout) id <$> traverse askRawDecl b
 
-coo :: String
-coo = unlines
-  [ "data N = Z | S N"
-  , "(+) :: N -> N -> N"
-  , "define x + y inductively x where"
-  , "  define x + y from x where"
-  , "    define Z + y = y"
-  , "    define S x' + y = S (x' + y)"
-  , "prove (x + y) + z = x + (y + z) inductively x"
-  ]
-
-doo :: String
-doo = unlines
-  [ "data N = Z | S N"
-  , "(+) :: N -> N -> N"
-  , "define x + y inductively x where"
-  , "  define x + y from x where"
-  , "    define Z + y = y"
-  , "    define S x' + y = S (x' + y)"
-  , "prove (x + y) + z = x + (y + z) inductively x where"
-  , "  prove x + y + z = x + (y + z) from x"
-  ]
-
-eoo :: String
-eoo = unlines
-  [ "data N = Z | S N"
-  , "(+) :: N -> N -> N"
-  , "define x + y inductively x where"
-  , "  define x + y from x where"
-  , "    define Z + y = y"
-  , "    define S x' + y = S (x' + y)"
-  , "prove (x + y) + z = x + (y + z) inductively x where"
-  , "  prove x + y + z = x + (y + z) from x where"
-  , "    given x = S x33 prove S x33 + y + z = S x33 + (y + z) tested"
-  ]
-
-foo :: String
 foo = unlines
-  [ "data N = Z | S N"
-  , "(+) :: N -> N -> N"
-  , "define x + y inductively x where"
-  , "  define x + y from x where"
-  , "    define Z + y = y"
-  , "    define S x' + y = S (x' + y)"
-  , "prove (x + y) + z = x + (y + z) inductively x where"
-  , "  prove x + y + z = x + (y + z) from x where"
-  , "    given x = S x33 prove S x33 + y + z = S x33 + (y + z) tested where"
-  , "      prove x33 + y + z = x33 + (y + z) given"
+  [ "data List x = Empty | x : List x"
+  , "(++) :: List x -> List x -> List x"
+  , "define xs ++ ys inductively xs where"
+  , "  define xs ++ ys from xs where"
+  , "    define Empty ++ ys = ys"
+  , "    define (x : xs') ++ ys = x : (xs' ++ ys)"
+  , "prove xs ++ Empty = xs inductively xs where"
+  , "  prove xs ++ Empty = xs from xs where"
+  , "    given xs = x : xs' prove (x : xs') ++ Empty = x : xs' tested"
   ]
 
 goo = unlines
-  [ "data N = Z | S N"
-  , "(+) :: N -> N -> N"
-  , "define x + y inductively x where"
-  , "  define x + y from x where"
-  , "    define Z + y = y"
-  , "    define S x' + y = S (x' + y)"
-  , "a :: N"
-  , "b :: N"
-  , "c :: N"
-  , "test (S a + b) + c"
+  [ "data Tree = Leaf | Node Tree Tree"
+  , "mirror :: Tree -> Tree"
+  , "define mirror t inductively t where"
+  , "  define mirror t from t where"
+  , "    define mirror Leaf = Leaf"
+  , "    define mirror (Node l r) = Node (mirror r) (mirror l)"
+  , "prove mirror (mirror t) = t inductively t where"
+  , "  prove mirror (mirror t) = t from t where"
+  , "    given t = Node l r prove mirror (mirror (Node l r)) = Node l r tested"
+  ]
+
+hoo = unlines
+  [ "data List x = Empty | x : List x"
+  , "(++) :: List x -> List x -> List x"
+  , "define xs ++ ys inductively xs where"
+  , "  define xs ++ ys from xs where"
+  , "    define Empty ++ ys = ys"
+  , "    define (x : xs') ++ ys = x : (xs' ++ ys)"
+  , "prove (xs ++ ys) ++ zs = xs ++ (ys ++ zs) inductively xs where"
+  , "  prove (xs ++ ys) ++ zs = xs ++ (ys ++ zs) from xs where"
+  , "    given xs = x : xs' prove ((x : xs') ++ ys) ++ zs = (x : xs') ++ (ys ++ zs) tested"
   ]
