@@ -86,6 +86,7 @@ data Gripe
   | OverOverload Con
   | NonCanonicalType Tm Con
   | BadFName String
+  | Unification Con Con
   | FAIL
   deriving Show
 
@@ -132,6 +133,10 @@ instance Functor AM where fmap = ap . return
 
 gripe :: Gripe -> AM x
 gripe g = AM $ \ _ _ -> Left g
+
+guardErr :: Bool -> Gripe -> AM ()
+guardErr True _ = return ()
+guardErr False err = gripe err
 
 instance Fail.MonadFail AM where
   fail _ = gripe FAIL
