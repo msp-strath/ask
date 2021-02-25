@@ -224,6 +224,7 @@ weeg xs z sb (Bind (nom, Hide ty) k : de) g = case k of
         yn <- fresh x
         weeg xs z ((nom, TP (yn, Hide (Sized ty z (Weer Big)))) : sb) de g
       _ -> gripe $ NotADataType ty
+weeg xs z sb (_ : de) g = weeg xs z sb de g
 
 bigg :: [String]     -- inductively what?
      -> Tm           -- size zone
@@ -252,3 +253,4 @@ bigg xs z sb (Bind (nom, Hide ty) k : de) g = case k of
         push $ Bind xp (User x)
         bigg xs z ((nom, TP xp) : sb) de g
       _ -> gripe $ NotADataType ty
+bigg xs z sb (_ : de) g = bigg xs z sb de g
