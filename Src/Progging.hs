@@ -231,7 +231,7 @@ bigg :: [String]     -- inductively what?
      -> [(Nom, Syn)] -- substitution
      -> [CxE]        -- quantifier prefix
      -> Tm           -- goal
-     -> AM Tm        -- inductive hypothesis
+     -> AM Tm        -- induction conclusion
 bigg xs z sb [] g = case xs of
   x : _ -> gripe $ Scope x
   [] -> return $ rfold e4p sb g
