@@ -243,7 +243,10 @@ elabTm ty (_, (t, _, y) :$$ ras) = do
       || (t, y) == (Sym, "::")
       || any declared ga -> do
       (e, sy) <- elabSyn y ras
-      subtype sy ty
+      cope (subtype sy ty) (\ _ -> do
+        True <- track ("SOOTY-SEZ-NO " ++ show sy ++ " " ++ show ty) $ return True
+        gripe NotEqual
+        ) return
       return $ TE e
     (Und, _) -> do
       guard $ null ras
@@ -454,7 +457,13 @@ make :: (Nom, Hide Tm) -> Tm -> Tm -> AM ()
 make (x, _) (TE (TP (y, _))) got | x == y = return ()
 make (x, _) t got | track ("MAKE " ++ show x ++ " = " ++ show t) False = undefined
 make xp@(x, Hide ty) t  got = do
-  nomBKind x >>= \case
+  de <- doorStep
+  doorStop
+  traverse push de
+  True <- track ("seeking " ++ show x ++ "\n" ++ show de) $ return True
+  k <- nomBKind x
+  True <- track (show x ++ " is a " ++ show k) $ return True
+  case k of
     User _ -> case t of
       TE (TP yp@(y, _)) -> nomBKind y >>= \case
         Hole -> make yp (TE (TP xp)) ty
@@ -470,12 +479,17 @@ make xp@(x, Hide ty) t  got = do
       subtype got ty
       ga <- gamma
       ga <- go ga []
-      True <- track "MADE" $ return True
       setGamma ga
+      de <- doorStep
+      doorStop
+      traverse push de
+      True <- track ("MADE\n" ++ show de) $ return True
+      return ()
  where
   go B0 ms = do
     True <- track ("AWOL " ++ show x) $ return True
     gripe FAIL -- shouldn't happen
+  go (ga :< z) ms | track ("MAKE-GO: " ++ show z ++ " " ++ show ms) False = undefined
   go (ga :< Bind p@(y, _) Hole) ms | x == y = do
     pDep y (ms, t) >>= \case
       True -> gripe FAIL
@@ -498,8 +512,8 @@ class PDep t where
   pDep :: Nom -> t -> AM Bool
 
 instance PDep Tm where
-  pDep x t = do
-    hnf t >>= \case
+  pDep x t = case t of {- do
+    hnf t >>= \case -}
       TC _ ts -> pDep x ts
       TB t -> pDep x t
       TE e -> pDep x e
