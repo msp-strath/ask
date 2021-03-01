@@ -421,6 +421,10 @@ unifySyn (e :$ a) (f :$ b) = do
   ran <$ unify dom a b
 unifySyn (TF (f, Hide sch) as bs) (TF (g, Hide _) cs ds) | f == g =
   unifyFun sch (as , bs) (cs, ds)
+unifySyn (a ::: s) (b ::: t) = do
+  unify Type s t
+  unify s a b
+  return s
 unifySyn _ _ = gripe FAIL
 
 unifyFun :: Sch -> ([Tm], [Tm]) -> ([Tm], [Tm]) -> AM Tm
