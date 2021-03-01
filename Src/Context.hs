@@ -75,6 +75,7 @@ data Gripe
   | ByAmbiguous String Tm
   | FromNeedsConnective Appl
   | TestNeedsEq Tm
+  | UnderNeedsEq Tm
   | NotGiven Tm
   | NotEqual
   | NotARule Appl
