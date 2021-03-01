@@ -348,3 +348,17 @@ bout :: Bloc Line -> String -> String
 bout (ls :-/ e) = rfold lout ls . case e of
   Stop -> id
   ls :-\ o -> rfold lout ls . bout o
+
+askTokIn :: String -> String -> Bool
+askTokIn a b = go (lexPhase0 a) (lexPhase0 b) where
+  go as bs | pref as bs = True
+  go as [] = False
+  go as (_ : bs) = go as bs
+  pref ((t, _, _) : as) bs | no t = pref as bs
+  pref as ((t, _, _) : bs) | no t = pref as bs
+  pref [] bs = True
+  pref _ [] = False
+  pref (a : as) (b : bs) = txt a == txt b && pref as bs
+  no Spc = True
+  no Cmm = True
+  no _ = False
