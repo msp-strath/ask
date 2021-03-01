@@ -131,4 +131,31 @@ splitProof xp@(xn, _) ty goal (c, tel) = quan B0 tel >>= demand
       (GIVEN (TC "=" [ty, TE (TP xp), tm]) $
          PROVE ((xn \\ goal) // (tm ::: ty)))
       hs
-  
+
+under :: Tm -> Tm -> String -> AM ()
+under (TE lhs) (TE rhs) h = () <$ go lhs rhs where
+  go (e :$ a) (f :$ b) = do
+    ty <- go e f
+    hnf ty >>= \case
+      TC "->" [dom, ran] -> do
+        fred . PROVE $ TC "=" [dom, a, b]
+        return ran
+      _ -> gripe FAIL
+  go (TP (xn, Hide ty)) (TP (yn, _)) | xn == yn = nomBKind xn >>= \case
+    User k | k == h -> return ty
+    _ -> gripe FAIL
+  go (TF (f, Hide sch) as bs) (TF (g, _) cs ds)
+    | fst (last f) == h && fst (last g) == h
+    = mo sch as bs cs ds
+  go _ _ = gripe FAIL
+  mo (Al s t) (a : as) bs (c : cs) ds = do
+    equal s (a, c)
+    mo (t // (a ::: s)) as bs cs ds
+  mo (iss :>> t) [] bs [] ds = so [] iss bs ds where
+    so m [] [] [] = return $ stan m t
+    so m ((x, s) : ss) (b : bs) (d : ds) = do
+      fred . PROVE $ TC "=" [stan m t, b, d]
+      so ((x, b) : m) ss bs ds
+    so _ _ _ _ = gripe FAIL
+  mo _ _ _ _ _ = gripe FAIL
+under _ _ f = gripe FAIL

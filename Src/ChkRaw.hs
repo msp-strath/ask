@@ -191,6 +191,9 @@ chkProof g m ps src = do
         Tested b -> hnf gt >>= \case
           TC "=" [ty, lhs, rhs] -> (Tested b, True) <$ tested ty lhs rhs
           _ -> gripe $ TestNeedsEq gt
+        Under f -> hnf gt >>= \case
+          TC "=" [ty, lhs, rhs] -> (Under f, True) <$ under lhs rhs f
+          _ -> gripe $ UnderNeedsEq gt
       (ns, b1) <- chkSubProofs ps
       let proven = case m of {Stub _ -> False; _ -> all happy ns}
       return $ Make Prf g m (Keep, b0 && b1 && proven) ns src
