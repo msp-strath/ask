@@ -8,6 +8,7 @@
     DeriveFunctor
   , FlexibleInstances
   , TupleSections
+  , LambdaCase
 #-}
 
 module Ask.Src.RawAsk where

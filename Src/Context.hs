@@ -36,6 +36,7 @@ data CxE -- what sort of thing is in the context?
   | Bind (Nom, Hide Tm) BKind
   | (Nom, [Pat]) :=: Syn  -- computation rule
   | Declare String Nom Sch
+  | Defined String
   | RecShadow String
   | ImplicitQuantifier
   | (Con, [Pat]) ::> (Con, Tel)  -- constructor declaration
@@ -73,6 +74,7 @@ data Gripe
   | Scope String
   | ByBadRule String Tm
   | ByAmbiguous String Tm
+  | EmptyInductively
   | FromNeedsConnective Appl
   | TestNeedsEq Tm
   | UnderNeedsEq Tm
@@ -211,10 +213,12 @@ what's :: String -> AM (Either (Nom, Sch) (Syn, Tm))
 what's x = do
   ga <- gamma
   cope (go ga)
-    (\ _ -> do
-      (e, ga) <- qu ga
-      setGamma ga
-      return e)
+    (\case
+      Scope _ -> do
+        (e, ga) <- qu ga
+        setGamma ga
+        return e
+      gr -> gripe gr)
     $ return
  where
   go :: Context -> AM (Either (Nom, Sch) (Syn, Tm))
@@ -224,9 +228,9 @@ what's x = do
   go (ga :< RecShadow y) | x == y = gripe (BadRec x)
   go (ga :< Declare y yn sch) | x == y = return $ Left (yn, sch)
   go (ga :< z) = go ga
-  decl (ga :< Declare y yn sch) | x == y = Just (yn, sch)
-  decl (ga :< _) = decl ga
-  decl B0 = Nothing
+--  decl (ga :< Declare y yn sch) | x == y = Just (yn, sch)
+--  decl (ga :< _) = decl ga
+--  decl B0 = Nothing
   qu ga@(_ :< ImplicitQuantifier) = do
     xTp <- (, Hide Type) <$> fresh "Ty"
     let xTy = TE (TP xTp)
