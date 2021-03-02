@@ -64,6 +64,7 @@ dubStep p f as = do
   True <- trade ("DUBSTEP " ++ show p ++ "  " ++ show f ++ show as) $ return True
   doorStop
   push ImplicitQuantifier
+  push $ Defined f
   (e, ty) <- elabSyn f as
   lox <- doorStep
   z@(f, _, is, ss, as) <- mayhem $ fnarg e []
@@ -136,6 +137,8 @@ inductively p@(Proglem de f u li ls la ty) xs = do
     (TE (TP xp), _) -> case
       foldMap (\case {Bind yp (User y) | xp == yp -> [y]; _ -> []}) de of
       [x] -> return (xp, (x, size1 xp))
+      _ -> gripe Mardiness
+    _ -> gripe Mardiness
   let sa = [(fst xp, (TM x [] ::: rfold e4p sa s)) | (xp, (x, s)) <- qs]
   let disch [] = return $ [(x, rfold e4p sa s) | (_, (x, s)) <- qs] :>> aty
       disch ((TE (TP xp), _) : li) =
@@ -145,7 +148,8 @@ inductively p@(Proglem de f u li ls la ty) xs = do
   True <- trade (show "INDHYP " ++ show sch) $ return True
   let mark B0 = return $ ([], B0
         :< Bind (non, Hide Zone) (User "")
-        :< Declare (uName p) (fNom p) sch)
+        :< Declare (uName p) (fNom p) sch
+        :< Defined (uName p))
       mark (ga :< Bind yp@(yn, Hide ty) (User y)) | elem yn xs = do
         ty <- hnf ty
         (sb, ga) <- mark ga

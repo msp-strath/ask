@@ -71,7 +71,8 @@ chkProg p gr mr ps src@(h,b) = do
     Is a -> do
       doorStop
       True <- tracy ("IS " ++ show a ++ " ?") $ return True
-      push $ RecShadow (uName p)
+      ga <- gamma
+      for (paranoia ga []) $ \ x -> push $ RecShadow x
       traverse push (localCx p)
       a@(Our t _) <- elabTmR (rightTy p) a
       True <- tracy ("IS SO " ++ show t) $ return True
@@ -90,6 +91,7 @@ chkProg p gr mr ps src@(h,b) = do
       tels <- conSplit ty
       traverse (expect xn ty p) tels
       pure (From (Our (TE e) a))
+    Ind [] -> gripe EmptyInductively
     Ind xs -> do
       p <- inductively p xs
       push (Expect p)
@@ -100,6 +102,12 @@ chkProg p gr mr ps src@(h,b) = do
   let defined = case m of {Stub _ -> False; _ -> all happy ns}
   return $ Make Def (Your gr) m (Keep, b && defined) ns src
  where
+  paranoia :: Bwd CxE -> [String] -> [String]
+  paranoia B0 defs = []
+  paranoia (ga :< Defined f) defs = paranoia ga (f : defs)
+  paranoia (ga :< Declare u _ _) defs | not (u `elem` defs) =
+    u : paranoia ga defs
+  paranoia (ga :< _) defs = paranoia ga defs
   expect :: Nom -> Tm -> Proglem -> (Con, Tel) -> AM ()
   expect xn ty p (c, tel) = do
     (de, sb) <- wrangle (localCx p)
@@ -180,6 +188,7 @@ chkProof g m ps src = do
               traverse (splitProof xp ty gt) cts
           _ -> gripe $ FromNeedsConnective h
         From h -> gripe $ FromNeedsConnective h
+        Ind [] -> gripe EmptyInductively
         Ind xs -> do
           indPrf gt xs
           return $ (Ind xs, True)
@@ -721,21 +730,29 @@ askRawDecl (RawProof (Make Prf gr mr () ps src), ls) = id <$
       return $ "{- " ++ e ++ "\n" ++ rfold lout ls "\n-}")
     return
   <* doorStep
-askRawDecl (RawProof (Make Def gr@(_, (_, _, f) :$$ as) mr () ps src), ls) = id
-  <$ doorStop
-  <*> cope (do
+askRawDecl (RawProof (Make Def gr@(_, (_, _, f) :$$ as) mr () ps src), ls) = do
+  doorStop
+  (b, s) <- cope (do
+      push (Defined f)
+      True <- tracy ("pushed Defined " ++ f) $ return True
       Left (fn, sch) <- what's f
+      pop $ \case
+        Defined g | f == g -> True
+        _ -> False
+      True <- tracy ("popped Defined " ++ f) $ return True
       p <- proglify fn (f, sch)
       p <- dubStep p f as
       True <- tracy (show p) $ return True
-      bifoldMap id (($ "") . rfold lout) <$> 
+      ((True,) . bifoldMap id (($ "") . rfold lout)) <$> 
         (chkProg p gr mr ps src >>= pout (Denty 1))
       )
      (\ gr -> do
        e <- ppGripe gr
-       return $ "{- " ++ e ++ "\n" ++ rfold lout ls "\n-}")
-    return
-  <* doorStep
+       return (False, "{- " ++ e ++ "\n" ++ rfold lout ls "\n-}"))
+     return
+  doorStep
+  if b then push (Defined f) else return ()
+  return s
 askRawDecl (RawProp tmpl intros, ls) = cope (chkProp tmpl intros)
   (\ gr -> do
     e <- ppGripe gr

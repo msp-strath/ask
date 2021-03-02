@@ -134,12 +134,19 @@ ppGripe (Scope x) = return $ "I can't find " ++ x ++ " in scope"
 ppGripe (ByBadRule r t) = do
   t <- ppTm AllOK t
   return $ "I can't find a rule called " ++ r ++ " that would prove " ++ t
+ppGripe (BadRec r) = return $
+  "It's dangerous to use " ++ r ++ " before you know what it means."
 ppGripe (ByAmbiguous r t) = do
   t <- ppTm AllOK t
   return $ "Please report a bug: I have too many rules called " ++ r ++ " that would prove " ++ t
+ppGripe EmptyInductively = do
+  return $ "To work inductively, you need at least one thing to do induction on."
 ppGripe (TestNeedsEq g) = do
   g <- ppTm AllOK g
   return $ "I can only test equations, not " ++ g
+ppGripe (UnderNeedsEq g) = do
+  g <- ppTm AllOK g
+  return $ "I can only reach under in equations, not " ++ g
 ppGripe (FromNeedsConnective (ls, _)) = return $
   rfold lout ls " has no main connective for 'from' to eliminate."
 ppGripe (NotGiven p) = do
