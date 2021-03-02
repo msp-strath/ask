@@ -236,7 +236,7 @@ elabTmR ty a = ((`Our` a)) <$> elabTm ty a
 
 elabTm :: Tm -> Appl -> AM Tm
 elabTm ty (_, a) | track (show ty ++ " on " ++ show a) False = undefined
-elabTm ty (_, (t, _, y) :$$ ras) = do
+elabTm ty (ls, (t, _, y) :$$ ras) = do
   ga <- gamma
   case (t, y) of
     _ | t == Lid
@@ -245,7 +245,9 @@ elabTm ty (_, (t, _, y) :$$ ras) = do
       (e, sy) <- elabSyn y ras
       cope (subtype sy ty) (\ _ -> do
         True <- track ("SOOTY-SEZ-NO " ++ show sy ++ " " ++ show ty) $ return True
-        gripe NotEqual
+        sy <- norm sy
+        ty <- norm ty
+        gripe $ Terror ls sy ty
         ) return
       return $ TE e
     (Und, _) -> do

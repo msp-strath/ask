@@ -22,6 +22,7 @@ import Control.Arrow ((***))
 import Ask.Src.Bwd
 import Ask.Src.Hide
 import Ask.Src.Tm
+import Ask.Src.Lexing
 import Ask.Src.RawAsk
 
 
@@ -80,6 +81,7 @@ data Gripe
   | UnderNeedsEq Tm
   | NotGiven Tm
   | NotEqual
+  | Terror [LexL] Tm Tm
   | NotARule Appl
   | BadRec String
   | Mardiness

@@ -62,6 +62,11 @@ ppTmR spot t = case readyTmR t of
   Left t -> ppTm spot t
   Right ls -> return $ rfold lout ls ""
 
+ppTy :: Spot -> Tm -> AM String
+ppTy spot (Sized t _ Big) = ("big " ++) <$> ppTm spot t
+ppTy spot (Sized t _ (Weer _)) = ("wee " ++) <$> ppTm spot t
+ppTy spot t = ppTm spot t
+
 ppTm :: Spot -> Tm -> AM String
 ppTm spot (TC f@(c : s) as)
   | isAlpha c = go f as
@@ -126,6 +131,11 @@ ppArgs :: Spot -> [Tm] -> String -> AM String
 ppArgs spot ts f = ppTm spot (TC f ts) -- you dirty so-and-so
 
 ppGripe :: Gripe -> AM String
+ppGripe (Terror ls sy ty) = do
+  sy <- ppTy AllOK sy
+  ty <- ppTy AllOK ty
+  return $ ("When checking " ++) . rfold lout ls $
+    concat [", I found it was a ", sy, " but I needed a ", ty, "."]
 ppGripe Surplus = return "I don't see why you need this"
 ppGripe (Duplication ty c) = do
   ty <- ppTm AllOK ty
