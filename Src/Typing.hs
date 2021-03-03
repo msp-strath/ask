@@ -180,6 +180,16 @@ eqFun (iss :>> t) ([], bs) ([], ds) = go [] iss t bs ds where
 eqFun _ _ _ = gripe FAIL
 
 
+normAQTy :: Tm -> AM Tm
+normAQTy (TC "=" [ty, l, r]) = do
+  ty <- norm ty
+  l <- normAQTy l
+  r <- normAQTy r
+  return $ TC "=" [ty, l, r]
+normAQTy (TC c ss) = TC c <$> traverse normAQTy ss
+normAQTy t = return t
+
+
 ------------------------------------------------------------------------------
 --  Pattern Matching
 ------------------------------------------------------------------------------
@@ -232,7 +242,7 @@ impQElabTm ty a = do
   return t
 
 elabTmR :: Tm -> Appl -> AM TmR
-elabTmR ty a = ((`Our` a)) <$> elabTm ty a
+elabTmR ty a = ((`Our` a)) <$> (elabTm ty a >>= normAQTy)
 
 elabTm :: Tm -> Appl -> AM Tm
 elabTm ty (_, a) | track (show ty ++ " on " ++ show a) False = undefined
@@ -442,17 +452,17 @@ unifyFun (iss :>> t) ([], bs) ([], ds) = go [] iss t bs ds where
   go _ _ _ _ _ = gripe FAIL
 unifyFun _ _ _ = gripe FAIL
 
+prepareSubQs :: Tel -> [Tm] -> [Tm] -> AM [((String, Tm), (Tm, Tm))]
+prepareSubQs (Pr _) [] [] = return []
+prepareSubQs (Ex s mo) (a : as) (b : bs) = do
+  unify s a b
+  prepareSubQs (mo // (a ::: s)) as bs
+prepareSubQs (xs :*: tel) (a : as) (b : bs) = do
+  sch <- prepareSubQs tel as bs
+  return $ topInsert (xs, (a, b)) sch
 
 unifies :: Tel -> [Tm] -> [Tm] -> AM ()
-unifies tel as bs = prepare tel as bs >>= execute [] where
-  prepare :: Tel -> [Tm] -> [Tm] -> AM [((String, Tm), (Tm, Tm))]
-  prepare (Pr _) [] [] = return []
-  prepare (Ex s mo) (a : as) (b : bs) = do
-    unify s a b
-    prepare (mo // (a ::: s)) as bs
-  prepare (xs :*: tel) (a : as) (b : bs) = do
-    sch <- prepare tel as bs
-    return $ topInsert (xs, (a, b)) sch
+unifies tel as bs = prepareSubQs tel as bs >>= execute [] where
   execute :: Matching -> [((String, Tm), (Tm, Tm))] -> AM ()
   execute m [] = return ()
   execute m (((x, s), (a, b)) : sch) = do

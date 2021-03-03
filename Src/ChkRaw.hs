@@ -416,9 +416,11 @@ fromSubs
   :: Tm      -- goal
   -> Tm      -- fmla
   -> AM ()
-fromSubs g f = map snd {- ignorant -} <$> invert f >>= \case
-  [[s]] -> flop s g
-  rs -> mapM_ (fred . foldr (GIVEN . propify) (PROVE g)) rs
+fromSubs g f = hnf f >>= \case
+  TC "=" [ty, lhs, rhs] -> ginger B0 [(ty, (lhs, rhs))] g
+  f -> map snd {- ignorant -} <$> invert f >>= \case
+    [[s]] -> flop s g
+    rs -> mapM_ (fred . foldr (GIVEN . propify) (PROVE g)) rs
  where
   flop (PROVE p)   g = fred . GIVEN p $ PROVE g
   flop (GIVEN h s) g = do
@@ -426,6 +428,43 @@ fromSubs g f = map snd {- ignorant -} <$> invert f >>= \case
     flop s g
   propify (GIVEN s t) = s :-> propify t
   propify (PROVE p)   = p
+
+ginger :: Bwd Tm -> [(Tm, (Tm, Tm))] -> Tm -> AM ()
+ginger qz [] g = fred $ foldr GIVEN (PROVE g) qz
+ginger qz ((ty, (l, r)) : qs) g =
+  flip (cope (equal ty (l, r)))
+  (\ _ -> ginger qz qs g)
+  $ \ _ -> do
+    ty <- norm ty
+    l' <- hnf l
+    r' <- hnf r
+    case (ty, l', r') of
+      (Prop, _ , _) -> ginger (qz :< (l :-> r) :< (r :-> l)) qs g
+      (TC d ss, TC c rs, TC e ts)
+        | c /= e -> flip (cope (isDataType d)) return $ \ _ -> dull
+        | otherwise -> do
+          tel <- constructor ty c
+          plan <- prepareSubQs tel rs ts
+          ginger qz (glom [] plan ++ qs) g
+      (_, TE (TP (xn, _)), _) -> nomBKind xn >>= \case
+        User x -> pDep xn r >>= \case
+          True -> dull
+          False -> ginger (qz :< TC "=" [ty, l', r])
+            (map (e4p (xn, r ::: ty)) qs) (e4p (xn, r ::: ty) g)
+        _ -> dull
+      (_, _, TE (TP (xn, _))) -> nomBKind xn >>= \case
+        User x -> pDep xn l >>= \case
+          True -> dull
+          False -> ginger (qz :< TC "=" [ty, l, r'])
+            (map (e4p (xn, l ::: ty)) qs) (e4p (xn, l ::: ty) g)
+        _ -> dull
+      _ -> dull
+  where
+  dull = norm ty >>= \ ty -> ginger (qz :< TC "=" [ty, l, r]) qs g
+  glom m [] = []
+  glom m (((x, s), (a, b)) : plan) =
+    (stan m s, (a, b)) : glom ((x, a) : m) plan
+
 
 pout :: LayKind -> Make Anno TmR -> AM (Odd String [LexL])
 pout k p@(Make mk g m (s, n) ps (h, b)) = let k' = scavenge b in case s of
@@ -712,7 +751,7 @@ askRawDecl :: (RawDecl, [LexL]) -> AM String
 askRawDecl (RawProof (Make Prf gr mr () ps src), ls) = id <$
   doorStop <*>
   cope (do
-      g <- impQElabTm Prop gr
+      g <- impQElabTm Prop gr 
       gt <- mayhem $ my g
       de <- doorStep
       let claim = discharge de gt

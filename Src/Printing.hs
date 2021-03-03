@@ -79,11 +79,19 @@ ppTm spot (TC f@(c : s) as)
       return $ "(" ++ intercalate ", " as ++ ")"
   | f == "=" = case as of
       [ty, lhs, rhs] -> do
+        ga <- gamma
+        let cand (_ ::> (c, _)) = [c]
+            cand (Data _ de) = foldMap cand de
+            cand _ = []
+        let crs = foldMap cand ga
         (lhs, rhs) <- case (lhs, rhs) of
               (TE _, _) -> return (lhs, rhs)
               (_, TE _) -> return (lhs, rhs)
+              (TC c _, TC d _)
+                | length (filter (c ==) crs) == 1 || length (filter (d ==) crs) == 1
+                -> return (lhs, rhs)
               _ -> do
-                ty <- hnf ty
+                ty <- norm ty
                 return (TE (lhs ::: ty), rhs)
         lhs <- ppTm (Infix (4, Left NAsso)) lhs
         rhs <- ppTm (Infix (4, Right NAsso)) rhs
@@ -132,13 +140,13 @@ ppArgs spot ts f = ppTm spot (TC f ts) -- you dirty so-and-so
 
 ppGripe :: Gripe -> AM String
 ppGripe (Terror ls sy ty) = do
-  sy <- ppTy AllOK sy
-  ty <- ppTy AllOK ty
+  sy <- ppTy AllOK =<< norm sy
+  ty <- ppTy AllOK =<< norm ty
   return $ ("When checking " ++) . rfold lout ls $
     concat [", I found it was a ", sy, " but I needed a ", ty, "."]
 ppGripe Surplus = return "I don't see why you need this"
 ppGripe (Duplication ty c) = do
-  ty <- ppTm AllOK ty
+  ty <- ppTm AllOK =<< norm ty
   return $ "I already have something called " ++ c ++ " that makes things in " ++ ty
 ppGripe (Scope x) = return $ "I can't find " ++ x ++ " in scope"
 ppGripe (ByBadRule r t) = do

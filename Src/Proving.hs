@@ -104,6 +104,7 @@ smegDown _ = return ()
 
 (|-) :: Tm -> AM x -> AM x
 h |- p = do
+  h <- normAQTy h
   push (Hyp True h)
   x <- p
   pop $ \case
