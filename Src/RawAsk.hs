@@ -78,7 +78,7 @@ data Method t
   | Is t
   | Ind [String]
   | Tested Bool -- ed?
-  | Under String
+  | Under t
   deriving (Show, Functor)
 
 data Given t
@@ -193,7 +193,7 @@ pMake = do
     <|> Ind <$ the Key "inductively" <* spc <*>
           sep (txt <$> kinda Lid) (spd (the Sym ","))
     <|> Tested <$> (False <$ the Key "test" <|> True <$ the Key "tested")
-    <|> Under <$ the Key "under" <* spc <*> (txt <$> kinda Lid)
+    <|> Under <$ the Key "under" <* spc <*> pAppl []
   pSubs = lol "where" pSub <|> pure ([] :-/ Stop)
   pSub = ((::-) <$> ext (([] ,) <$> pGivens <* spc) <*> pMake <* spc <* eol)
       ?> ((SubPGuff . fst) <$> ext (many (eat Just) <* eol))

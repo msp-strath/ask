@@ -133,8 +133,8 @@ splitProof xp@(xn, _) ty goal (c, tel) = quan B0 tel >>= demand
          PROVE ((xn \\ goal) // (tm ::: ty)))
       hs
 
-under :: Tm -> Tm -> String -> AM ()
-under (TE lhs) (TE rhs) h = () <$ go lhs rhs where
+under :: Tm -> Tm -> Appl -> AM ()
+under (TE lhs) (TE rhs) (_, (_, _, h) :$$ []) = () <$ go lhs rhs where
   go (e :$ a) (f :$ b) = do
     ty <- go e f
     hnf ty >>= \case

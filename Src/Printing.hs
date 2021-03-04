@@ -43,7 +43,7 @@ pppa :: Spot -> Wot -> String -> String
 pppa x y s = if paren x y then "(" ++ s ++ ")" else s where
   paren AllOK _ = False
   paren RadSpot w = w <= Rad
-  paren (Infix (i, a)) (Inf (j, b)) =
+  paren s@(Infix (i, a)) w@(Inf (j, b)) =
     j < i || (j == i && case (a, b) of
       (Left LAsso, LAsso) -> False
       (Right RAsso, RAsso) -> False
