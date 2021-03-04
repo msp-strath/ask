@@ -23,14 +23,14 @@ import Ask.Src.Typing
 
 import Debug.Trace
 
-trice = const id
+trice = trace
 
 by :: Tm -> Appl -> AM TmR
 by goal a@(_, (t, _, r) :$$ ss) | elem t [Uid, Sym] = do
   subses <- fold <$> (gamma >>= traverse backchain)
   case subses of
     [(tel, subs)] -> do
-      (t, m) <- elabVec r tel ss
+      (t, m) <- elabVec EXP r tel ss
       mapM_ fred (stan m subs)
       return $ Our t a
     []     -> gripe $ ByBadRule r goal
