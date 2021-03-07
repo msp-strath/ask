@@ -23,7 +23,7 @@ import Ask.Src.Typing
 
 import Debug.Trace
 
-trice = trace
+trice = const id
 
 by :: Tm -> Appl -> AM TmR
 by goal a@(_, (t, _, r) :$$ ss) | elem t [Uid, Sym] = do
