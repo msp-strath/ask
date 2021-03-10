@@ -43,7 +43,7 @@ pppa :: Spot -> Wot -> String -> String
 pppa x y s = if paren x y then "(" ++ s ++ ")" else s where
   paren AllOK _ = False
   paren RadSpot w = w <= Rad
-  paren (Infix (i, a)) (Inf (j, b)) =
+  paren s@(Infix (i, a)) w@(Inf (j, b)) =
     j < i || (j == i && case (a, b) of
       (Left LAsso, LAsso) -> False
       (Right RAsso, RAsso) -> False
@@ -200,7 +200,11 @@ ppGripe (BadFName f) = return $ case f of
       " but function names should begin in lowercase. (Did you mean data ... = "
       ++ f ++ " ...?)"
   _ -> "I'm afraid that " ++ f ++ " is an unsuitable name for a function."
-    
+ppGripe (Unification found expected) =
+  return $ "I was compelled to expect " ++ show expected ++ "but I was given " ++ show found ++ " instead"
+ppGripe (NonCanonicalType ty con) =
+  return $ show con ++ " is a constructor but I am not sure it should be there."
+
 ppGripe FAIL = return $
   "It went wrong but I've forgotten how. Please ask a human for help."
 ppGripe g = return $ show g

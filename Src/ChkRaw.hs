@@ -201,7 +201,7 @@ chkProof g m ps src = do
           TC "=" [ty, lhs, rhs] -> (Tested b, True) <$ tested ty lhs rhs
           _ -> gripe $ TestNeedsEq gt
         Under f -> hnf gt >>= \case
-          TC "=" [ty, lhs, rhs] -> (Under f, True) <$ under lhs rhs f
+          TC "=" [ty, lhs, rhs] -> (Under (Your f), True) <$ under lhs rhs f
           _ -> gripe $ UnderNeedsEq gt
       (ns, b1) <- chkSubProofs ps
       let proven = case m of {Stub _ -> False; _ -> all happy ns}
@@ -826,8 +826,10 @@ filth s = case runAM go () initAskState of
  where
   go :: AM String
   go = do
-    ftab <- getFixities
-    bifoldMap (($ "") . rfold lout) id <$> traverse askRawDecl (snd $ raw ftab s)
+    fi <- getFixities
+    let (fo, b) = raw fi s
+    setFixities fo
+    bifoldMap (($ "") . rfold lout) id <$> traverse askRawDecl b
 
 ordure :: String -> String
 ordure s = case runAM go () initAskState of
@@ -836,8 +838,10 @@ ordure s = case runAM go () initAskState of
  where
   go :: AM String
   go = do
-    ft <- getFixities
-    bifoldMap (($ "") . rfold lout) id <$> traverse askRawDecl (snd $ raw ft s)
+    fi <- getFixities
+    let (fo, b) = raw fi s
+    setFixities fo
+    bifoldMap (($ "") . rfold lout) id <$> traverse askRawDecl b
 
 initAskState :: AskState
 initAskState = AskState
