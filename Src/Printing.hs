@@ -188,7 +188,7 @@ ppGripe (WrongNumOfArgs c n as) = return $
   blat [(ls, _)] = rfold lout ls ""
   blat ((ls, _) : as) = rfold lout ls $ " and " ++ blat as
 ppGripe (DoesNotMake c ty) = do
-  ty <- ppTm AllOK ty
+  ty <- ppTy AllOK ty
   return $ c ++ " cannot make a thing of type " ++ ty
 ppGripe (OverOverload c) = return $
   "Please report a bug. " ++ c ++ " has unsafe overloading."

@@ -467,7 +467,7 @@ unify ty a b = do  -- pay more attention to types
       | z == y && i == j -> unify Type a b
     (TC f as, TC g bs) -> do
       guardErr (f == g) (Unification f g)
-      tel <- constructor ty f
+      tel <- constructor EXP ty f
       unifies tel as bs
     (TE (TP xp), t) -> make xp t ty
     (s, TE (TP yp)) -> make yp s ty
