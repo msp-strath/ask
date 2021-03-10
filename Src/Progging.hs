@@ -65,11 +65,12 @@ dubStep p f as = do
   doorStop
   push ImplicitQuantifier
   push $ Defined f
-  (e, ty) <- elabSyn f as
+  Left (n, sch) <- what's f
+  (e, ty) <- elabFun PAT (n, Hide sch) B0 sch as
   lox <- doorStep
   z@(f, _, is, ss, as) <- mayhem $ fnarg e []
-  True <- trade ("FNARG " ++ show z) $ return True
   guard $ f == fNom p
+  True <- trade ("FNARG " ++ show z) $ return True
   p <- tro lox as (leftAppl p) p
   True <- trade (show p ++ "\nDUBBING") $ return True
   nx <- nub <$> ((++)

@@ -76,6 +76,7 @@ data Gripe
   | ByBadRule String Tm
   | ByAmbiguous String Tm
   | EmptyInductively
+  | InductiveHypsDon'tLike Con
   | FromNeedsConnective Appl
   | TestNeedsEq Tm
   | UnderNeedsEq Tm
@@ -85,6 +86,7 @@ data Gripe
   | NotARule Appl
   | BadRec String
   | Mardiness
+  | NoSizedConstruction
   | NotADataType Tm
   | WrongNumOfArgs Con Int [Appl]
   | DoesNotMake Con Tm

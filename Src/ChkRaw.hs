@@ -85,10 +85,10 @@ chkProg p gr mr ps src@(h,b) = do
     From a@(_, ((_, _, x) :$$ as)) -> do
       doorStop
       traverse push (localCx p)
-      (e, _) <- elabSyn x as
+      (e, _) <- elabSyn EXP x as
       doorStep
       TE (TP (xn, Hide ty)) <- return (upTE e)
-      tels <- conSplit ty
+      tels <- conSplit PAT ty
       traverse (expect xn ty p) tels
       pure (From (Our (TE e) a))
     Ind [] -> gripe EmptyInductively
@@ -176,14 +176,14 @@ chkProof g m ps src = do
         By r -> (,True) <$> By <$> (gt `by` r)
         From h@(_, (t, _, _) :$$ _)
           | elem t [Uid, Sym] -> do
-            ht <- elabTm Prop h
+            ht <- elabTm EXP Prop h
             demand (PROVE ht)
             fromSubs gt ht
             return (From (Our ht h), True)
         From h@(_, (Lid, _, x) :$$ []) -> what's x >>= \case
           Right (e@(TP xp), ty) -> do
             ty <- hnf ty
-            cts <- conSplit ty
+            cts <- conSplit PAT ty
             (From (Our (TE e) h), True) <$
               traverse (splitProof xp ty gt) cts
           _ -> gripe $ FromNeedsConnective h
@@ -365,7 +365,7 @@ validSubProof sgs sps = do
   return (b, splott us ds m)
  where
   go ((srg, (ds, Given h : gs)) ::- p@(Make k sg sm () sps src)) =
-    cope (elabTm Prop h)
+    cope (elabTm EXP Prop h)
       (\ gr -> return $ (False, (srg, (ds, map (fmap Your) (Given h : gs))) ::-
         Make k (Your sg) (fmap Your sm) (Junk gr, True)
           (fmap subPassive sps) src))
@@ -417,7 +417,20 @@ fromSubs
   -> Tm      -- fmla
   -> AM ()
 fromSubs g f = hnf f >>= \case
-  TC "=" [ty, lhs, rhs] -> ginger B0 [(ty, (lhs, rhs))] g
+  q@(TC "=" [ty, lhs, rhs]) -> do
+    ty <- norm ty
+    lhs' <- hnf lhs
+    rhs' <- hnf rhs
+    case (ty, lhs', rhs') of
+      (TC d ss, TC c rs, TC e ts)
+        | c /= e -> flip (cope (isDataType d)) return $ \ _ ->
+           fred . GIVEN q $ PROVE g
+        | otherwise -> ginger B0 [(ty, (lhs, rhs))] g
+      (_, TE (TP (xn, _)), _) ->
+           fred $ PROVE (e4p (xn, rhs ::: ty) g)
+      (_, _, TE (TP (xn, _))) ->
+           fred $ PROVE (e4p (xn, lhs ::: ty) g)
+      _ -> fred . GIVEN q $ PROVE g
   f -> map snd {- ignorant -} <$> invert f >>= \case
     [[s]] -> flop s g
     rs -> mapM_ (fred . foldr (GIVEN . propify) (PROVE g)) rs
@@ -443,21 +456,9 @@ ginger qz ((ty, (l, r)) : qs) g =
       (TC d ss, TC c rs, TC e ts)
         | c /= e -> flip (cope (isDataType d)) return $ \ _ -> dull
         | otherwise -> do
-          tel <- constructor ty c
+          tel <- constructor PAT ty c
           plan <- prepareSubQs tel rs ts
           ginger qz (glom [] plan ++ qs) g
-      (_, TE (TP (xn, _)), _) -> nomBKind xn >>= \case
-        User x -> pDep xn r >>= \case
-          True -> dull
-          False -> ginger (qz :< TC "=" [ty, l', r])
-            (map (e4p (xn, r ::: ty)) qs) (e4p (xn, r ::: ty) g)
-        _ -> dull
-      (_, _, TE (TP (xn, _))) -> nomBKind xn >>= \case
-        User x -> pDep xn l >>= \case
-          True -> dull
-          False -> ginger (qz :< TC "=" [ty, l, r'])
-            (map (e4p (xn, l ::: ty)) qs) (e4p (xn, l ::: ty) g)
-        _ -> dull
       _ -> dull
   where
   dull = norm ty >>= \ ty -> ginger (qz :< TC "=" [ty, l, r]) qs g
@@ -601,7 +602,7 @@ pout k p@(Make mk g m (s, n) ps (h, b)) = let k' = scavenge b in case s of
 
 
 noDuplicate :: Tm -> Con -> AM ()
-noDuplicate ty con = cope (constructor ty con)
+noDuplicate ty con = cope (constructor EXP ty con)
   (\ _ -> return ())
   (\ _ -> gripe $ Duplication Prop con)
 
@@ -621,7 +622,7 @@ chkProp (ls, (t, _, rel) :$$ as) intros | elem t [Uid, Sym]  = do
   chkIntro tel (RawIntro aps rp prems) = do
     doorStop
     push ImplicitQuantifier
-    (ht, _) <- elabVec rel tel aps
+    (ht, _) <- elabVec EXP rel tel aps
     (hp, sb0) <- patify ht
     (ru, as) <- case rp of
       (_, (t, _, ru) :$$ as) | elem t [Uid, Sym] -> return (ru, as)
@@ -639,7 +640,7 @@ chkProp (ls, (t, _, rel) :$$ as) intros | elem t [Uid, Sym]  = do
     return ([ru], [byr])
   chkPrem :: ([Appl], Appl) -> AM Subgoal
   chkPrem (hs, g) =
-    rfold GIVEN <$> traverse (elabTm Prop) hs <*> (PROVE <$> elabTm Prop g)
+    rfold GIVEN <$> traverse (elabTm EXP Prop) hs <*> (PROVE <$> elabTm EXP Prop g)
 chkProp _ intros = gripe FAIL
 
 patify :: Tm -> AM (Pat, [(Nom, Syn)])
@@ -710,7 +711,7 @@ chkSig la@(_, (t, _, f@(c : _)) :$$ as) rty
   doorStop
   push ImplicitQuantifier
   xts <- placeHolders as
-  rty <- elabTm Type rty
+  rty <- elabTm EXP Type rty
   pop $ \case {ImplicitQuantifier -> True; _ -> False}
   lox <- doorStep
   sch <- schemify (map fst xts) lox rty
@@ -721,10 +722,10 @@ chkSig la@(_, (t, _, f@(c : _)) :$$ as) rty
 
 chkTest :: Appl -> Maybe Appl -> AM String
 chkTest (ls, (_,_,f) :$$ as) mv = do
-  (e, sy) <- elabSyn f as
+  (e, sy) <- elabSyn EXP f as
   case mv of
     Just t@(rs, _) -> do
-      v <- elabTm sy t
+      v <- elabTm EXP sy t
       b <- cope (equal sy (TE e, v)) (\ _ -> return False) (\ _ -> return True)
       if b
         then return . ("tested " ++) . rfold lout ls . (" = " ++) . rfold lout rs $ ""
