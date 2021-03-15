@@ -431,9 +431,11 @@ fromSubs g f = hnf f >>= \case
       (_, _, TE (TP (xn, _))) ->
            fred $ PROVE (e4p (xn, lhs ::: ty) g)
       _ -> fred . GIVEN q $ PROVE g
-  f -> map snd {- ignorant -} <$> invert f >>= \case
-    [[s]] -> flop s g
-    rs -> mapM_ (fred . foldr (GIVEN . propify) (PROVE g)) rs
+  f -> invert f >>= \case
+    [([], [s])] -> flop s g
+    rs -> mapM_
+      (\ (de, hs) -> fred . disch de $ foldr (GIVEN . propify) (PROVE g) hs)
+      rs
  where
   flop (PROVE p)   g = fred . GIVEN p $ PROVE g
   flop (GIVEN h s) g = do
@@ -441,6 +443,15 @@ fromSubs g f = hnf f >>= \case
     flop s g
   propify (GIVEN s t) = s :-> propify t
   propify (PROVE p)   = p
+  disch [] g = g
+  disch (Bind (xn, Hide s) _ : hs) g =
+    EVERY s (xn \\ disch hs g)
+  disch (Hyp _ h : hs) g = GIVEN h $
+    let g' = disch hs g in case h of
+      TC "=" [ty, TE (TP (xn, _)), t] | not (pDep xn t) ->
+        e4p (xn, t ::: ty) g'
+      _ -> g'
+  disch (_ : hs) g = disch hs g
 
 ginger :: Bwd Tm -> [(Tm, (Tm, Tm))] -> Tm -> AM ()
 ginger qz [] g = fred $ foldr GIVEN (PROVE g) qz
@@ -861,52 +872,3 @@ filthier as s = case runAM go () as of
     let (fo, b) = raw fi s
     setFixities fo
     bifoldMap (($ "") . rfold lout) id <$> traverse askRawDecl b
-
-foo = unlines
-  [ "data List x = Empty | x : List x"
-  , "(++) :: List x -> List x -> List x"
-  , "define xs ++ ys inductively xs where"
-  , "  define xs ++ ys from xs where"
-  , "    define Empty ++ ys = ys"
-  , "    define (x : xs') ++ ys = x : (xs' ++ ys)"
-  , "prove xs ++ Empty = xs inductively xs where"
-  , "  prove xs ++ Empty = xs from xs where"
-  , "    given xs = x : xs' prove (x : xs') ++ Empty = x : xs' tested"
-  ]
-
-goo = unlines
-  [ "data Tree = Leaf | Node Tree Tree"
-  , "mirror :: Tree -> Tree"
-  , "define mirror t inductively t where"
-  , "  define mirror t from t where"
-  , "    define mirror Leaf = Leaf"
-  , "    define mirror (Node l r) = Node (mirror r) (mirror l)"
-  , "prove mirror (mirror t) = t inductively t where"
-  , "  prove mirror (mirror t) = t from t where"
-  , "    given t = Node l r prove mirror (mirror (Node l r)) = Node l r tested"
-  ]
-
-hoo = unlines
-  [ "data List x = Empty | x : List x"
-  , "(++) :: List x -> List x -> List x"
-  , "define xs ++ ys inductively xs where"
-  , "  define xs ++ ys from xs where"
-  , "    define Empty ++ ys = ys"
-  , "    define (x : xs') ++ ys = x : (xs' ++ ys)"
-  , "prove (xs ++ ys) ++ zs = xs ++ (ys ++ zs) inductively xs where"
-  , "  prove (xs ++ ys) ++ zs = xs ++ (ys ++ zs) from xs where"
-  , "    given xs = x : xs' prove ((x : xs') ++ ys) ++ zs = (x : xs') ++ (ys ++ zs) tested"
-  ]
-
-ioo = unlines
-  [ "data N = Z | S N"
-  , "(+) :: N -> N -> N"
-  , "defined x + y inductively x where"
-  , "  defined x + y from x where"
-  , "    defined Z + y = y"
-  , "    defined S x + y = S (x + y)"
-  , "prove (x + y) + z = x + (y + z) inductively x where"
-  , "  prove (x + y) + z = x + (y + z) from x where"
-  , "    given x = S x' prove (S x' + y) + z = S x' + (y + z)"
-  , "      tested"
-  ]

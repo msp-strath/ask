@@ -11,7 +11,9 @@
 module Ask.Src.Proving where
 
 import Data.Foldable
+import Data.Traversable
 
+import Ask.Src.Thin
 import Ask.Src.Hide
 import Ask.Src.Bwd
 import Ask.Src.Lexing
@@ -47,14 +49,99 @@ by goal a@(_, (t, _, r) :$$ ss) | elem t [Uid, Sym] = do
   backchain _ = return []
 by goal r = gripe $ NotARule r
 
-invert :: Tm -> AM [((String, Tel), [Subgoal])]
+invert :: Tm -> AM [([CxE], [Subgoal])]
 invert hyp = fold <$> (gamma >>= traverse try )
  where
-  try :: CxE -> AM [((String, Tel), [Subgoal])]
-  try (ByRule True ((gop, (h, tel)) :<= prems)) = cope (maAM (gop, hyp))
-    (\ _ -> return [])
-    (\ m -> return [((h, stan m tel), stan m prems)])
+  try :: CxE -> AM [([CxE], [Subgoal])]
+  try (ByRule True ((gop, (h, tel)) :<= prems)) = do
+    doorStop
+    m <- prayTel [] tel
+    gingerly m Prop gop hyp >>= \case
+      [(_, m)] -> do
+        de <- doorStep
+        return [(de, stan m prems)]
+      _ -> doorStep *> return []
   try _ = return []
+
+prayTel :: Matching -> Tel -> AM Matching
+prayTel m (Pr hs) = do
+  for (stan m hs) $ \ h -> push $ Hyp True h
+  return m
+prayTel m (Ex s b) = do
+  xn <- fresh "x"
+  let u = "x" ++ show (snd (last xn)) -- BOO!
+  let xp = (xn, Hide (stan m s))
+  push $ Bind xp (User u)
+  prayTel m (b // TP xp)
+prayTel m ((x, s) :*: t) = do
+  xn <- fresh x
+  let u = x ++ show (snd (last xn)) -- BOO!
+  let xp = (xn, Hide (stan m s))
+  push $ Bind xp (User u)
+  prayTel ((x, TE (TP xp)) : m) t
+
+prayPat :: Matching -> Tm -> Pat -> AM (Syn, Matching)
+prayPat m ty (PC c ps) = do
+  let ty' = stan m ty
+  tel <- constructor PAT ty' c
+  (ts, m) <- prayPats m tel ps
+  return (TC c ts ::: ty', m)
+prayPat m ty (PM x _) = do
+  xn <- fresh x
+  let u = "x" ++ show (snd (last xn)) -- BOO!
+  let xp = (xn, Hide (stan m ty))
+  push $ Bind xp (User u)
+  return (TP xp, (x, TE (TP xp)) : m)
+
+prayPats :: Matching -> Tel -> [Pat] -> AM ([Tm], Matching)
+prayPats m (Pr hs) [] = do
+  for (stan m hs) $ \ h -> push $ Hyp True h
+  return ([], m)
+prayPats m (Ex s b) (p : ps) = do
+  (e, m) <- prayPat m s p
+  (ts, m) <- prayPats m (b // e) ps
+  return (upTE e : ts, m)
+prayPats m ((x, s) :*: tel) (p : ps) = do
+  (e, m) <- prayPat m s p
+  (ts, m) <- prayPats ((x, upTE e) : m) tel ps
+  return (upTE e : ts, m)
+prayPats _ _ _ = gripe Mardiness
+
+gingerly :: Matching -> Tm -> Pat -> Tm -> AM [(Syn, Matching)]
+gingerly m ty p@(PC gc ps) t = hnf t >>= \case
+  TC hc ts | gc /= hc -> return [] | otherwise -> do
+    let ty' = stan m ty
+    tel <- constructor PAT ty' gc
+    gingerlies [] tel ps ts >>= \case
+      [(us, m)] -> return [(TC gc us ::: ty', m)]
+      _ -> return []
+  t -> do
+    let ty' = stan m ty
+    (e, m) <- prayPat m ty p
+    push . Hyp True $ TC "=" [ty', t, upTE e]
+    return [(e, m)]
+gingerly m ty (PM x th) t = case thicken th t of
+  Nothing -> return []
+  Just u -> return [(t ::: stan m ty, (x, u) : m)]
+gingerly _ _ _ _ = gripe Mardiness
+
+
+gingerlies :: Matching -> Tel -> [Pat] -> [Tm] -> AM [([Tm], Matching)]
+gingerlies m (Pr hs) [] [] = do
+  for (stan m hs) $ \ h -> push $ Hyp True h
+  return [([], m)]
+gingerlies m (Ex s b) (p : ps) (t : ts) = gingerly m s p t >>= \case
+  [(e, m)] -> gingerlies m (b // e) ps ts >>= \case
+    [(us, m)] -> return [(upTE e : us, m)]
+    _ -> return []
+  _ -> return []
+gingerlies m ((x, s) :*: tel) (p : ps) (t : ts) = gingerly m s p t >>= \case
+  [(e, m)] -> let u = upTE e in
+    gingerlies ((x, u) : m) tel ps ts >>= \case
+      [(us, m)] -> return [(u : us, m)]
+      _ -> return []
+  _ -> return []
+gingerlies _ _ _ _ = return []
 
 given :: Tm -> AM Bool{-proven?-}
 given goal = do

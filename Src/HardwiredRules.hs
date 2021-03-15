@@ -60,6 +60,14 @@ myWeirdRules =
     [ PROVE $ TC "=" [TM "T" [], TM "r" [], TM "s" []]
     , PROVE $ TC "=" [TM "T" [], TM "s" [], TM "t" []]
     ]
+  , (PC "=" [PC "->" [PM "S" mempty, PM "T" mempty], PM "f" mempty, PM "g" mempty],
+     ("Applying", Pr [])) :<=
+    [ EVERY (TM "S" []) . L . PROVE $ TC "="
+       [ TM "T" []
+       , TE ((TM "f" mempty ::: TC "->" [TM "S" mempty, TM "T" mempty]) :$ TE (TV 0))
+       , TE ((TM "g" mempty ::: TC "->" [TM "S" mempty, TM "T" mempty]) :$ TE (TV 0))
+       ]
+    ]
   ]
 
 myContext :: Context
