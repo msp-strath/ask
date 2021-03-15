@@ -572,13 +572,11 @@ make xp@(x, Hide ty) t got = do
     True <- track ("AWOL " ++ show x) $ return True
     gripe FAIL -- shouldn't happen
   go (ga :< z) ms | track ("MAKE-GO: " ++ show z ++ " " ++ show ms) False = undefined
-  go (ga :< Bind p@(y, _) Hole) ms | x == y = do
-    pDep y (ms, t) >>= \case
+  go (ga :< Bind p@(y, _) Hole) ms | x == y = case pDep y (ms, t) of
       True -> gripe FAIL
       False -> return (ga <>< ms :< Bind p (Defn t))
   go (ga :< Bind (y, _) _) ms | x == y = gripe FAIL
-  go (ga :< z@(Bind (y, _) k)) ms = do
-    pDep y (ms, t) >>= \case
+  go (ga :< z@(Bind (y, _) k)) ms = case pDep y (ms, t) of
       False -> (:< z) <$> go ga ms
       True -> case k of
         User _ -> gripe FAIL
@@ -591,28 +589,26 @@ make xp@(x, Hide ty) t got = do
 ------------------------------------------------------------------------------
 
 class PDep t where
-  pDep :: Nom -> t -> AM Bool
+  pDep :: Nom -> t -> Bool
 
 instance PDep Tm where
-  pDep x t = case t of {- do
-    hnf t >>= \case -}
+  pDep x t = case t of
       TC _ ts -> pDep x ts
       TB t -> pDep x t
       TE e -> pDep x e
 
 instance PDep Syn where
-  pDep x (TP (y, _)) = return $ x == y
-  pDep x (t ::: ty) = (||) <$> pDep x t <*> pDep x ty
-  pDep x (e :$ s) =  (||) <$> pDep x e <*> pDep x s
-  pDep x (TF _ is as) = (||) <$> pDep x is <*> pDep x as
-  pDep x _ = return False
+  pDep x (TP (y, _)) =  x == y
+  pDep x (t ::: ty) = pDep x t || pDep x ty
+  pDep x (e :$ s) =  pDep x e || pDep x s
+  pDep x (TF _ is as) = pDep x is || pDep x as
+  pDep x _ = False
 
 instance PDep t => PDep [t] where
-  pDep x ts = do
-    any id <$> traverse (pDep x) ts
+  pDep x ts = any id (map (pDep x) ts)
 
 instance (PDep s, PDep t) => PDep (s, t) where
-  pDep x (s, t) = (||) <$> pDep x s <*> pDep x t
+  pDep x (s, t) = pDep x s || pDep x t
 
 instance PDep t => PDep (Bind t) where
   pDep x (K t) = pDep x t
@@ -620,12 +616,12 @@ instance PDep t => PDep (Bind t) where
 
 instance PDep CxE where
   pDep x (Hyp _ p) = pDep x p
-  pDep x (Bind (_, Hide ty) k) = (||) <$> pDep x ty <*> pDep x k
-  pDep _ _ = return False
+  pDep x (Bind (_, Hide ty) k) = pDep x ty || pDep x k
+  pDep _ _ = False
 
 instance PDep BKind where
   pDep x (Defn t) = pDep x t
-  pDep _ _ = return False
+  pDep _ _ = False
 
 
 ------------------------------------------------------------------------------
@@ -664,7 +660,7 @@ telify vs lox = go [] lox where
   go ps (Bind (xp, Hide ty) bk : lox) = case bk of
     Defn t -> e4p (xp, t ::: ty) <$> go ps lox
     Hole -> do
-      bs <- traverse (\ (_, (xp, _)) -> pDep xp ty) ps
+      bs <- traverse (\ (_, (xp, _)) -> return $ pDep xp ty) ps
       guard $ all not bs
       Ex ty <$> ((xp \\) <$> go ps lox)
     User x -> e4p (xp, TM x [] ::: ty) <$> go ((x, (xp, ty)) : ps) lox
@@ -682,14 +678,14 @@ schemify vs lox rt = go [] lox where
   go ps (Bind (xp, Hide ty) bk : lox) = case bk of
     Defn t -> e4p (xp, t ::: ty) <$> go ps lox
     Hole -> do
-      bs <- traverse (\ (_, (xp, _)) -> pDep xp ty) ps
+      bs <- traverse (\ (_, (xp, _)) -> return $ pDep xp ty) ps
       guard $ all not bs
       Al ty <$> ((xp \\) <$> go ps lox)
     User x
       | x `elem` vs ->
         e4p (xp, TM x [] ::: ty) <$> go ((x, (xp, ty)) : ps) lox
       | otherwise -> do
-        bs <- traverse (\ (_, (xp, _)) -> pDep xp ty) ps
+        bs <- traverse (\ (_, (xp, _)) -> return $ pDep xp ty) ps
         guard $ all not bs
         Al ty <$> ((xp \\) <$> go ps lox)
   go ps ((_ ::> _) : lox) = go ps lox
