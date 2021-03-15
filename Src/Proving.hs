@@ -56,10 +56,14 @@ invert hyp = fold <$> (gamma >>= traverse try )
   try (ByRule True ((gop, (h, tel)) :<= prems)) = do
     doorStop
     m <- prayTel [] tel
+    True <- trice ("INVERT TRIES: " ++ show ((hyp, gop), (h, tel), prems)) $ return True
     gingerly m Prop gop hyp >>= \case
       [(_, m)] -> do
+        let prems' = stan m prems
         de <- doorStep
-        return [(de, stan m prems)]
+        True <- trice ("INVERT: " ++ show m ++ " ===> " ++
+                  show (de, prems')) $ return True
+        return [(de, prems')]
       _ -> doorStep *> return []
   try _ = return []
 
@@ -112,7 +116,7 @@ gingerly m ty p@(PC gc ps) t = hnf t >>= \case
   TC hc ts | gc /= hc -> return [] | otherwise -> do
     let ty' = stan m ty
     tel <- constructor PAT ty' gc
-    gingerlies [] tel ps ts >>= \case
+    gingerlies m tel ps ts >>= \case
       [(us, m)] -> return [(TC gc us ::: ty', m)]
       _ -> return []
   t -> do
@@ -122,7 +126,7 @@ gingerly m ty p@(PC gc ps) t = hnf t >>= \case
     (e, m) <- prayPat m ty' p
     push . Hyp True $ TC "=" [ty', t, upTE e]
     return [(e, m)]
-gingerly m ty (PM x th) t = case thicken th t of
+gingerly m ty (PM x th) t = case trice ("GINGERLY PM: " ++ x) $ thicken th t of
   Nothing -> return []
   Just u -> return [(t ::: stan m ty, (x, u) : m)]
 gingerly _ _ _ _ = gripe Mardiness
