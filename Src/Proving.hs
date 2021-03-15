@@ -82,10 +82,10 @@ prayTel m ((x, s) :*: t) = do
 
 prayPat :: Matching -> Tm -> Pat -> AM (Syn, Matching)
 prayPat m ty (PC c ps) = do
-  let ty' = stan m ty
-  tel <- constructor PAT ty' c
+  ty <- hnf $ stan m ty
+  tel <- constructor PAT ty c
   (ts, m) <- prayPats m tel ps
-  return (TC c ts ::: ty', m)
+  return (TC c ts ::: ty, m)
 prayPat m ty (PM x _) = do
   xn <- fresh x
   let u = "x" ++ show (snd (last xn)) -- BOO!
@@ -116,8 +116,10 @@ gingerly m ty p@(PC gc ps) t = hnf t >>= \case
       [(us, m)] -> return [(TC gc us ::: ty', m)]
       _ -> return []
   t -> do
-    let ty' = stan m ty
-    (e, m) <- prayPat m ty p
+    let ty' = case t of
+          TE (TP (_, Hide ty)) -> ty -- would like a size if it's there
+          _ -> ty
+    (e, m) <- prayPat m ty' p
     push . Hyp True $ TC "=" [ty', t, upTE e]
     return [(e, m)]
 gingerly m ty (PM x th) t = case thicken th t of
