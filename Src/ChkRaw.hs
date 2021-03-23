@@ -626,7 +626,8 @@ chkProp (ls, (t, _, rel) :$$ as) intros | elem t [Uid, Sym]  = do
   (rus, cxs) <- fold <$> traverse (chkIntro tel) intros
   guard $ nodup rus
   mapM_ pushOutDoor cxs
-  doorStep
+  de <- doorStep
+  True <- tracy ("CHKPROP-KILLS: " ++ show de) $ return True
   return ()
  where
   chkIntro :: Tel -> RawIntro -> AM ([String], [CxE])
@@ -645,13 +646,20 @@ chkProp (ls, (t, _, rel) :$$ as) intros | elem t [Uid, Sym]  = do
     pop $ \case {ImplicitQuantifier -> True; _ -> False}
     ps <- traverse chkPrem prems
     lox <- doorStep
+    True <- tracy ("PROP-INTRO-KILL: " ++ show lox) $ return True
     tel <- telify vs lox
-    let (tel', ps') = rfold e4p sb (tel, toList ps)
+    let pss = subOut lox ps
+    let (tel', ps') = rfold e4p sb (tel, toList pss)
     let byr = ByRule True $ (hp, (ru, tel')) :<= ps'
+    True <- tracy ("PROP-INTRO: " ++ show byr) $ return True
     return ([ru], [byr])
   chkPrem :: ([Appl], Appl) -> AM Subgoal
   chkPrem (hs, g) =
     rfold GIVEN <$> traverse (elabTm EXP Prop) hs <*> (PROVE <$> elabTm EXP Prop g)
+  subOut [] ps = ps
+  subOut (Bind (x, Hide ty) (Defn t) : de) ps =
+    subOut (e4p (x, t ::: ty) de) (fmap (e4p (x, t ::: ty)) ps)
+  subOut (_ : de) ps = subOut de ps
 chkProp _ intros = gripe FAIL
 
 patify :: Tm -> AM (Pat, [(Nom, Syn)])

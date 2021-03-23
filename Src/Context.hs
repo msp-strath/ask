@@ -256,6 +256,26 @@ nomBKind x = gamma >>= foldl me empty where
   me no (Bind (y, _) bk) | x == y = return bk
   me no _ = no
 
+-- wildly incomplete
+instance Stan CxE where
+  stan ms (Bind (x, Hide ty) k) =
+    Bind (x, Hide (stan ms ty)) (stan ms k)
+  stan ms z = z
+  sbst u es (Bind (x, Hide ty) k) =
+    Bind (x, Hide (sbst u es ty)) (sbst u es k)
+  sbst u es z = z
+  abst x i (Bind (n, Hide ty) k) =
+    Bind <$> ((n,) <$> (Hide <$> abst x i ty)) <*> abst x i k
+  abst x i z = pure z
+
+instance Stan BKind where
+  stan ms (Defn t) = Defn (stan ms t)
+  stan _ k = k
+  sbst u es (Defn t) = Defn (sbst u es t)
+  sbst _ _ k = k
+  abst x i (Defn t) = Defn <$> abst x i t
+  abst _ _ k = pure k
+
 
 ------------------------------------------------------------------------------
 --  Demanding!
