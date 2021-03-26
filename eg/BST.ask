@@ -1,0 +1,199 @@
+------------------------------------------------------------------------------
+-- Bool and ifthenelse
+------------------------------------------------------------------------------
+
+data Bool = True | False
+
+ifthenelse :: Bool -> t -> t -> t
+defined ifthenelse b aye naw from b where
+  defined ifthenelse True aye naw = aye
+  defined ifthenelse False aye naw = naw
+
+
+------------------------------------------------------------------------------
+-- N, prop <=, Bool le
+------------------------------------------------------------------------------
+
+data N = Z | S N
+
+prop N <= N where
+  prove Z <= n by LeZ
+  prove S n <= S m by LeSS where
+    prove n <= m
+
+le :: N -> N -> Bool
+defined le x y inductively x where
+  defined le x y from x where
+    defined le Z y = True
+    defined le (S x') y from y where
+      defined le (S x') Z = False
+      defined le (S x') (S y') = le x' y'
+
+-- The useful thing here is to show that le x y establishes "which way round"
+-- x and y should go in an ordered structure.
+
+proven le x y = True -> x <= y inductively x where
+  proven le x y = True -> x <= y from x where
+    given x = Z proven le Z y = True -> Z <= y by ImpI where
+      given le Z y = True proven Z <= y by LeZ
+    given x = S x' proven le (S x') y = True -> S x' <= y from y where
+      given y = Z proven le (S x') Z = True -> S x' <= Z  by ImpI where
+        given le (S x') Z = True proven S x' <= Z from le (S x') Z = True
+      given y = S y' 
+          proven le (S x') (S y') = True -> S x' <= S y'  by ImpI where
+        given le (S x') (S y') = True proven S x' <= S y' by LeSS where
+          proven x' <= y' from le x' y' = True -> x' <= y'
+
+proven le x y = False -> y <= x inductively x where
+  proven le x y = False -> y <= x from x where
+    given x = Z proven le Z y = False -> y <= Z by ImpI where
+      given le Z y = False proven y <= Z from le Z y = False
+    given x = S x' proven le (S x') y = False -> y <= S x' from y where
+      given y = Z proven le (S x') Z = False -> Z <= S x' by ImpI where
+        given le (S x') Z = False proven Z <= S x' by LeZ
+      given y = S y'
+          proven le (S x') (S y') = False -> S y' <= S x' by ImpI where
+        given le (S x') (S y') = False proven S y' <= S x' by LeSS where
+          proven y' <= x' from le x' y' = False -> y' <= x'
+
+
+------------------------------------------------------------------------------
+-- Tree, Bnd, BST
+------------------------------------------------------------------------------
+
+data Tree = Leaf | Node Tree N Tree
+
+data Bnd = Bot | Val N | Top
+
+prop LeB Bnd Bnd where
+  prove LeB Bot y by LeBot
+  prove LeB (Val x) (Val y) by LeVal where
+    prove x <= y
+  prove LeB x Top by LeTop
+
+prop BST Bnd Tree Bnd where
+  prove BST l Leaf u by BSTLeaf where
+    prove LeB l u
+  prove BST l (Node lx x xu) u by BSTNode where
+    prove BST l lx (Val x)
+    prove BST (Val x) xu u
+
+
+------------------------------------------------------------------------------
+-- insert
+------------------------------------------------------------------------------
+
+insert :: N -> Tree -> Tree
+defined insert n t inductively t where
+  defined insert n t from t where
+    defined insert n Leaf = Node Leaf n Leaf
+    defined insert n (Node l x r) =
+      ifthenelse (le n x)
+        (Node (insert n l) x r)
+        (Node l x (insert n r))
+
+
+------------------------------------------------------------------------------
+-- the key helper proof to analyse the condition in the step case
+------------------------------------------------------------------------------
+
+-- The idea is to make the status of the condition explicit knowledge
+-- in the correctness proof for each branch.
+
+proven
+  ((b = (True :: Bool) -> BST l aye u) & (b = (False :: Bool) -> BST l naw u))
+  -> BST l (ifthenelse b aye naw) u by ImpI where
+  given (b = True -> BST l aye u) & (b = False -> BST l naw u)
+      proven BST l (ifthenelse b aye naw) u
+        from (b = True -> BST l aye u) & (b = False -> BST l naw u) where
+    given b = True -> BST l aye u
+        , b = False -> BST l naw u
+        proven BST l (ifthenelse b aye naw) u from b where
+      given b = True proven BST l (ifthenelse True aye naw) u
+          from b = True -> BST l aye u
+      given b = False proven BST l (ifthenelse False aye naw) u
+          from b = False -> BST l naw u
+
+
+------------------------------------------------------------------------------
+-- the main deal
+------------------------------------------------------------------------------
+
+proven (LeB l (Val n) & LeB (Val n) u) & BST l t u -> BST l (insert n t) u
+    inductively t where
+  proven (LeB l (Val n) & LeB (Val n) u) & BST l t u -> BST l (insert n t) u
+      from t where
+
+  -- base case
+    given t = Leaf
+        proven (LeB l (Val n) & LeB (Val n) u) & BST l Leaf u
+           -> BST l (insert n Leaf) u by ImpI where
+      given (LeB l (Val n) & LeB (Val n) u) & BST l Leaf u
+          proven BST l (insert n Leaf) u
+           from (LeB l (Val n) & LeB (Val n) u) & BST l Leaf u where
+        given LeB l (Val n) & LeB (Val n) u, BST l Leaf u
+            proven BST l (insert n Leaf) u
+             from LeB l (Val n) & LeB (Val n) u where
+          given LeB l (Val n), LeB (Val n) u proven BST l (insert n Leaf) u
+              by BSTNode where
+            proven BST l Leaf (Val n) by BSTLeaf
+            proven BST (Val n) Leaf u by BSTLeaf
+
+  -- step case
+    given t = Node lx x xu
+        proven (LeB l (Val n) & LeB (Val n) u) & BST l (Node lx x xu) u
+           -> BST l (insert n (Node lx x xu)) u by ImpI where
+      given (LeB l (Val n) & LeB (Val n) u) & BST l (Node lx x xu) u
+          proven BST l (insert n (Node lx x xu)) u
+           from (LeB l (Val n) & LeB (Val n) u) & BST l (Node lx x xu) u where
+        given LeB l (Val n) & LeB (Val n) u, BST l (Node lx x xu) u
+            proven BST l (insert n (Node lx x xu)) u
+             from LeB l (Val n) & LeB (Val n) u where
+          given LeB l (Val n), LeB (Val n) u
+              proven BST l (insert n (Node lx x xu)) u
+                  from BST l (Node lx x xu) u where
+            given BST l lx (Val x), BST (Val x) xu u
+                proven BST l (insert n (Node lx x xu)) u from
+                  -- which way did we go, and what do we know?
+                    (le n x = True -> BST l (Node (insert n lx) x xu) u)
+                  & (le n x = False -> BST l (Node lx x (insert n xu)) u)
+                  -> BST l (ifthenelse (le n x)
+                             (Node (insert n lx) x xu)
+                             (Node lx x (insert n xu))) u where
+              proven (le n x = True -> BST l (Node (insert n lx) x xu) u)
+                  & (le n x = False -> BST l (Node lx x (insert n xu)) u)
+                  by AndI where
+
+              -- left case
+                proven le n x = True -> BST l (Node (insert n lx) x xu) u
+                    by ImpI where
+                  given le n x = True proven BST l (Node (insert n lx) x xu) u
+                      by BSTNode where
+                    proven BST l (insert n lx) (Val x) from
+                        -- left induction hypothesis
+                        (LeB l (Val n) & LeB (Val n) (Val x))
+                        & BST l lx (Val x)
+                        -> BST l (insert n lx) (Val x) where
+                      proven (LeB l (Val n) & LeB (Val n) (Val x))
+                          & BST l lx (Val x) by AndI where
+                        proven LeB l (Val n) & LeB (Val n) (Val x)
+                            by AndI where
+                          proven LeB (Val n) (Val x) by LeVal where
+                            proven n <= x from le n x = True -> n <= x
+
+              -- right case
+                proven le n x = False -> BST l (Node lx x (insert n xu)) u
+                    by ImpI where
+                  given le n x = False proven BST l (Node lx x (insert n xu)) u
+                      by BSTNode where
+                    proven BST (Val x) (insert n xu) u from
+                        -- right induction hypothesis
+                        (LeB (Val x) (Val n) & LeB (Val n) u)
+                        & BST (Val x) xu u
+                        -> BST (Val x) (insert n xu) u where
+                      proven (LeB (Val x) (Val n) & LeB (Val n) u)
+                          & BST (Val x) xu u by AndI where
+                        proven LeB (Val x) (Val n) & LeB (Val n) u
+                            by AndI where
+                          proven LeB (Val x) (Val n) by LeVal where
+                            proven x <= n from le n x = False -> x <= n
