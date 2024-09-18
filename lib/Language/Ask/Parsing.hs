@@ -4,14 +4,14 @@
   , LambdaCase
 #-}
 
-module Ask.Src.Parsing where
+module Language.Ask.Parsing where
 
 import Control.Monad
 import Control.Applicative
 import Data.List
 
-import Ask.Src.OddEven
-import Ask.Src.Lexing
+import Language.Ask.OddEven
+import Language.Ask.Lexing
 
 newtype ParTok e x = ParTok {parTok
   :: e       -- some sort of read-only environment, never mind what

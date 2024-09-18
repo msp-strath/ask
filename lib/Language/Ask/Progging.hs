@@ -1,6 +1,6 @@
 ------------------------------------------------------------------------------
 ----------                                                          ----------
-----------     Ask.Src.Progging                                     ----------
+----------     Progging                                             ----------
 ----------                                                          ----------
 ------------------------------------------------------------------------------
 
@@ -8,7 +8,7 @@
     LambdaCase
 #-}
 
-module Ask.Src.Progging where
+module Language.Ask.Progging where
 
 import Data.Char
 import Data.List hiding ((\\))
@@ -19,14 +19,14 @@ import Control.Arrow ((***))
 
 import Debug.Trace
 
-import Ask.Src.Bwd
-import Ask.Src.Hide
-import Ask.Src.HalfZip
-import Ask.Src.Tm
-import Ask.Src.Context
-import Ask.Src.Typing
-import Ask.Src.Lexing
-import Ask.Src.RawAsk
+import Language.Ask.Bwd
+import Language.Ask.Hide
+import Language.Ask.HalfZip
+import Language.Ask.Tm
+import Language.Ask.Context
+import Language.Ask.Typing
+import Language.Ask.Lexing
+import Language.Ask.RawAsk
 
 trade = const id
 
@@ -53,7 +53,7 @@ proglify f (u, s) = go B0 B0 s where
     x <- fresh ""
     let xp = (x, Hide a)
     go (de :< Bind xp (User "")) (iz :< (TE (TP xp), a)) (s // TP xp)
-  
+
 
 ------------------------------------------------------------------------------
 --  get names from user
@@ -163,7 +163,7 @@ inductively p@(Proglem de f u li ls la ty) xs = do
           Bind (yn, Hide ty) k -> do
             let yp = (yn, Hide (rfold e4p sb ty))
             return ((yn, TP yp) : sb, ga :< Bind yp k)
-          z -> return (sb, ga :< z) 
+          z -> return (sb, ga :< z)
   (sb, de) <- mark de
   return $ Proglem de f u
     (rfold e4p sb li)

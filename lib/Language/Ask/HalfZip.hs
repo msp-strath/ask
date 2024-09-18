@@ -1,4 +1,4 @@
-module Ask.Src.HalfZip where
+module Language.Ask.HalfZip where
 
 class HalfZippable f where
   halfZipWith :: (x -> y -> Maybe z) -> f x -> f y -> Maybe (f z)

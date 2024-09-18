@@ -1,4 +1,4 @@
-module Ask.Src.OddEven where
+module Language.Ask.OddEven where
 
 import Data.Bifunctor
 import Data.Bifoldable

@@ -1,6 +1,6 @@
 ------------------------------------------------------------------------------
 ----------                                                          ----------
-----------     Ask.Src.Context                                      ----------
+----------     Context                                              ----------
 ----------                                                          ----------
 ------------------------------------------------------------------------------
 
@@ -11,7 +11,7 @@
   , LambdaCase
 #-}
 
-module Ask.Src.Context where
+module Language.Ask.Context where
 
 import Control.Monad
 import qualified Control.Monad.Fail as Fail
@@ -19,11 +19,11 @@ import qualified Data.Map as M
 import Control.Applicative
 import Control.Arrow ((***))
 
-import Ask.Src.Bwd
-import Ask.Src.Hide
-import Ask.Src.Tm
-import Ask.Src.Lexing
-import Ask.Src.RawAsk
+import Language.Ask.Bwd
+import Language.Ask.Hide
+import Language.Ask.Tm
+import Language.Ask.Lexing
+import Language.Ask.RawAsk
 
 
 ------------------------------------------------------------------------------
@@ -336,5 +336,3 @@ data Proglem = Proglem
   , leftAppl :: [(Tm, Tm)] -- ditto for application arguments
   , rightTy  :: Tm         -- return type
   } deriving Show
-
-

@@ -1,6 +1,6 @@
 ------------------------------------------------------------------------------
 ----------                                                          ----------
-----------     Ask.Src.Proving                                      ----------
+----------     Proving                                              ----------
 ----------                                                          ----------
 ------------------------------------------------------------------------------
 
@@ -8,20 +8,20 @@
     LambdaCase
 #-}
 
-module Ask.Src.Proving where
+module Language.Ask.Proving where
 
 import Data.Foldable
 import Data.Traversable
 
-import Ask.Src.Thin
-import Ask.Src.Hide
-import Ask.Src.Bwd
-import Ask.Src.Lexing
-import Ask.Src.RawAsk
-import Ask.Src.Tm
-import Ask.Src.Glueing
-import Ask.Src.Context
-import Ask.Src.Typing
+import Language.Ask.Thin
+import Language.Ask.Hide
+import Language.Ask.Bwd
+import Language.Ask.Lexing
+import Language.Ask.RawAsk
+import Language.Ask.Tm
+import Language.Ask.Glueing
+import Language.Ask.Context
+import Language.Ask.Typing
 
 import Debug.Trace
 
@@ -40,7 +40,7 @@ by goal a@(_, (t, _, r) :$$ ss) | elem t [Uid, Sym] = do
  where
   backchain :: CxE -> AM [(Tel, [Subgoal])] -- list of successes
   backchain (ByRule _ ((gop, (h, tel)) :<= prems))
-    | h == r = 
+    | h == r =
     cope (do
       m <- maAM (gop, goal)
       return [(stan m tel, stan m prems)])
@@ -167,7 +167,7 @@ given goal = do
       (\ gr -> trice "OOPS" $ gripe gr)
       return
     doorStep
-    True <- trice "BINGO" $ return True    
+    True <- trice "BINGO" $ return True
     return b
     )
     (\ gr -> go ga) return

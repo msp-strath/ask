@@ -1,6 +1,6 @@
 ------------------------------------------------------------------------------
 ----------                                                          ----------
-----------     Ask.Src.RawAsk                                       ----------
+----------     RawAsk                                               ----------
 ----------                                                          ----------
 ------------------------------------------------------------------------------
 
@@ -11,12 +11,12 @@
   , LambdaCase
 #-}
 
-module Ask.Src.RawAsk where
+module Language.Ask.RawAsk where
 
-import Ask.Src.OddEven
-import Ask.Src.Lexing
-import Ask.Src.Parsing
-import Ask.Src.Tm
+import Language.Ask.OddEven
+import Language.Ask.Lexing
+import Language.Ask.Parsing
+import Language.Ask.Tm
 
 import qualified Data.Map as M
 import Control.Applicative
@@ -38,7 +38,7 @@ data RawDecl
   | RawTest Appl (Maybe Appl)
   | RawProof (Make () Appl)
   deriving Show
-  
+
 data RawIntro
   = RawIntro
   { introPats :: [Appl]
