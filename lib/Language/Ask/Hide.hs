@@ -1,4 +1,4 @@
-module Ask.Src.Hide where
+module Language.Ask.Hide where
 
 newtype Hide x = Hide {peek :: x}
 

@@ -1,6 +1,6 @@
 ------------------------------------------------------------------------------
 ----------                                                          ----------
-----------     Ask.Src.Typing                                       ----------
+----------     Typing                                               ----------
 ----------                                                          ----------
 ------------------------------------------------------------------------------
 
@@ -11,7 +11,7 @@
   , TypeSynonymInstances
   , FlexibleInstances #-}
 
-module Ask.Src.Typing where
+module Language.Ask.Typing where
 
 --import Data.List
 import Control.Applicative
@@ -23,15 +23,15 @@ import Data.List hiding ((\\))
 
 import Debug.Trace
 
-import Ask.Src.Bwd
-import Ask.Src.Thin
-import Ask.Src.Hide
-import Ask.Src.HalfZip
-import Ask.Src.Lexing
-import Ask.Src.RawAsk
-import Ask.Src.Tm
-import Ask.Src.Glueing
-import Ask.Src.Context
+import Language.Ask.Bwd
+import Language.Ask.Thin
+import Language.Ask.Hide
+import Language.Ask.HalfZip
+import Language.Ask.Lexing
+import Language.Ask.RawAsk
+import Language.Ask.Tm
+import Language.Ask.Glueing
+import Language.Ask.Context
 
 track = const id
 
@@ -328,7 +328,7 @@ elabTm m ty (ls, l@(_, _, y) :$$ ras) = do
       fst <$> elabVec m y tel ras
     _ -> gripe FAIL
  where
-  
+
 
 shitSort :: [((String, Tm), Appl)] -> AM [((String, Tm), Appl)]
 shitSort [] = return []

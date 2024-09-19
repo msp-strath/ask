@@ -1,11 +1,11 @@
-module Ask.Src.HardwiredRules where
+module Language.Ask.HardwiredRules where
 
 import qualified Data.Map as M
 
-import Ask.Src.Bwd
-import Ask.Src.Tm
-import Ask.Src.RawAsk
-import Ask.Src.Context
+import Language.Ask.Bwd
+import Language.Ask.Tm
+import Language.Ask.RawAsk
+import Language.Ask.Context
 
 myFixities :: FixityTable
 myFixities = M.fromList

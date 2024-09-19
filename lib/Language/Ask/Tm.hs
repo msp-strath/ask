@@ -1,6 +1,6 @@
 ------------------------------------------------------------------------------
 ----------                                                          ----------
-----------     Ask.Src.Tm                                           ----------
+----------     Tm                                                   ----------
 ----------                                                          ----------
 ------------------------------------------------------------------------------
 
@@ -12,7 +12,7 @@
   , PatternSynonyms
 #-}
 
-module Ask.Src.Tm where
+module Language.Ask.Tm where
 
 import Data.Bits
 import Data.List hiding ((\\))
@@ -21,10 +21,10 @@ import Control.Arrow ((***))
 import Data.Monoid
 import Control.Monad.Writer
 
-import Ask.Src.Bwd
-import Ask.Src.Thin
-import Ask.Src.HalfZip
-import Ask.Src.Hide
+import Language.Ask.Bwd
+import Language.Ask.Thin
+import Language.Ask.HalfZip
+import Language.Ask.Hide
 
 
 ------------------------------------------------------------------------------
@@ -127,7 +127,7 @@ instance Thin s => Thin (Chk s) where
   thicken th (TC c ts) = TC c <$> thicken th ts
   thicken th (TB t)    = TB <$> thicken th t
   thicken th (TE s)    = TE <$> thicken th s
-  
+
 instance Thin Syn where
   TV i <^> th = TV (i <^> th)
   (t ::: _T) <^> th = (t <^> th) ::: (_T <^> th)
@@ -230,7 +230,7 @@ instance Stan Syn where
          [TV i | i <- [u ..]]
   sbst u es (t ::: _T) = sbst u es t ::: sbst u es _T
   sbst u es (e :$ s) = sbst u es e :$ sbst u es s
-  sbst u es (TF f is as) = TF f (sbst u es is) (sbst u es as) 
+  sbst u es (TF f is as) = TF f (sbst u es is) (sbst u es as)
   sbst u es e = e
   abst x i (TP (y, _)) | x == y = TV i <$ tell (Any True)
   abst x i (t ::: _T) = (:::) <$> abst x i t <*> abst x i _T
@@ -302,7 +302,7 @@ instance Stan t => Stan (Hide t) where
   stan ms (Hide t) = Hide (stan ms t)
   sbst u es (Hide t) = Hide (sbst u es t)
   abst x i (Hide t) = Hide <$> abst x i t
-  
+
 
 ------------------------------------------------------------------------------
 --  Metavariable dependency testing and topological insertion

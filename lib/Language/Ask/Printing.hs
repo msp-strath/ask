@@ -1,18 +1,18 @@
 {-# LANGUAGE LambdaCase #-}
 
-module Ask.Src.Printing where
+module Language.Ask.Printing where
 
 import Data.Char
 import Data.List
 
-import Ask.Src.Hide
-import Ask.Src.Bwd
-import Ask.Src.Lexing
-import Ask.Src.RawAsk
-import Ask.Src.Tm
-import Ask.Src.Glueing
-import Ask.Src.Context
-import Ask.Src.Typing
+import Language.Ask.Hide
+import Language.Ask.Bwd
+import Language.Ask.Lexing
+import Language.Ask.RawAsk
+import Language.Ask.Tm
+import Language.Ask.Glueing
+import Language.Ask.Context
+import Language.Ask.Typing
 
 data Spot = AllOK | RadSpot | Infix (Int, Either Assocy Assocy) | Fun | Arg deriving (Show, Eq)
 data Wot = Rad | Inf (Int, Assocy) | App deriving (Show, Eq)
