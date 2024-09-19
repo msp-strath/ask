@@ -105,9 +105,8 @@ executable ask
     -- other-extensions:
 
     -- Other library packages from which modules are imported.
-    build-depends:
-        base ^>=4.19.1.0,
-        ask
+    build-depends: ask
+                 , base >=4.16 && <=4.21
 
     -- Directories containing source files.
     hs-source-dirs:   src
@@ -138,6 +137,5 @@ test-suite ask-test
     main-is:          Main.hs
 
     -- Test dependencies.
-    build-depends:
-        base ^>=4.19.1.0,
-        ask
+    build-depends: ask
+                 , base >=4.16 && <=4.21
