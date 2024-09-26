@@ -37,6 +37,8 @@ data RawDecl
   | RawSig Appl Appl
   | RawTest Appl (Maybe Appl)
   | RawProof (Make () Appl)
+  | RawGrammar Con [[GramBit]]
+  | RawParse (Make () ParseThing)
   deriving Show
 
 data RawIntro
@@ -62,13 +64,14 @@ data SubMake a t
   | SubPGuff [LexL]
   deriving (Functor)
 
-data Making = Prf | Def deriving Eq
+data Making = Prf | Def | Pse deriving Eq
 instance Show Making where
   show Prf = "prove"
   show Def = "define"
+  show Pse = "parse"
 done :: Making -> Bool -> String
 done m False = show m
-done m True  = show m ++ case m of {Prf -> "n"; Def -> "d"}
+done m True  = show m ++ case m of {Prf -> "n"; _ -> "d"}
 
 data Method t
   = Stub Bool -- is there a "?" ?
@@ -88,6 +91,12 @@ data Given t
 data Assocy = LAsso | NAsso | RAsso deriving (Show, Eq)
 type FixityTable = M.Map String (Int, Assocy)
 
+data GramBit = Terminal String | NonTerminal Con deriving (Show, Eq)
+
+data ParseThing
+  = ParseProb Con (Maybe String)
+  | ParseProd [GramBit]
+  deriving Show
 
 
 ------------------------------------------------------------------------------
@@ -131,11 +140,13 @@ pDecl = good <* eol where
      <|> RawFixity <$> (((,) <$> penv <*> mkFixity) >>= agree)
      <|> uncurry RawProp <$ the Key "prop" <*> pProp
      <|> uncurry RawData <$ the Key "data" <*> pData
+     <|> uncurry RawGrammar <$ the Key "grammar" <*> pGrammar
      <|> RawSig <$> pAppl ["::", "="] <* spd (the Sym "::") <*> pAppl []
      <|> RawTest <$ (the Key "test" <|> the Key "tested") <* spc
            <*> pAppl ["="] <*>
            (Just <$ spd (the Sym "=") <*> pAppl [] <|> pure Nothing)
-     <|> RawProof <$> pMake
+     <|> RawProof <$> pMake pGoal (pAppl [])
+     <|> RawParse <$> pMake pParseProb pParseProd
   agree (ft, at) = at <$ guard (all id $ M.intersectionWith (==) at ft)
 
 pProp :: PF (Appl, Bloc RawIntro)
@@ -163,12 +174,33 @@ pIntro h = do
 pData :: PF (Appl, [Appl])
 pData = (,) <$ spc <*> pAppl ["="] <* spd (the Sym "=") <*> sep (pAppl ["|"]) (spd (the Sym "|"))
 
-pMake :: PF (Make () Appl)
-pMake = do
+pMaking :: PF Making
+pMaking = Prf <$ (the Key "prove" <|> the Key "proven")
+      <|> Def <$ (the Key "define" <|> the Key "defined")
+      <|> Pse <$ (the Key "parse" <|> the Key "parsed")
+
+pGoal :: Making -> PF Appl
+pGoal Def = pAppl ["="]
+pGoal Prf = pAppl []
+pGoal Pse = empty
+
+pParseProb :: Making -> PF ParseThing
+pParseProb Pse
+  = ParseProb <$> pNonTerminal <*> (Just <$ spc <*> (txt <$> kinda Str) <|> pure Nothing)
+pParseProb _ = empty
+
+pProduction :: PF [GramBit]
+pProduction = concat <$> sep pGramBit spc
+
+pParseProd :: PF ParseThing
+pParseProd = ParseProd <$> pProduction
+
+pMake :: (Making -> PF a) -> PF a -> PF (Make () a)
+pMake pg px = do
   (top, (mk, go, me)) <- ext $ do
     mk <- pMaking
     spc
-    go <- pAppl $ case mk of {Prf -> []; Def -> ["="]}
+    go <- pg mk
     spc
     me <- pMethod mk
     return (mk, go, me)
@@ -182,23 +214,22 @@ pMake = do
     , source     = (top, body)
     }
   where
-  pMaking = Prf <$ (the Key "prove" <|> the Key "proven")
-        <|> Def <$ (the Key "define" <|> the Key "defined")
   pMethod mk
     =   Stub <$> ((True <$ the Sym "?") ?> (False <$ pure ()))
-    <|> From <$ the Key "from" <* spc <*> pAppl []
-    <|> By   <$ the Key "by"   <* spc <*> pAppl []
+    <|> From <$ the Key "from" <* guard (mk /= Pse) <* spc <*> px
+    <|> By   <$ the Key "by"   <* spc <*> px
     <|> MGiven <$ the Key "given"
-    <|> Is <$ guard (mk == Def) <* the Sym "=" <* spc <*> pAppl []
-    <|> Ind <$ the Key "inductively" <* spc <*>
+    <|> Is <$ guard (mk == Def) <* the Sym "=" <* spc <*> px
+    <|> Ind <$ the Key "inductively" <* guard (mk /= Pse) <* spc <*>
           sep (txt <$> kinda Lid) (spd (the Sym ","))
     <|> Tested <$> (False <$ the Key "test" <|> True <$ the Key "tested")
-    <|> Under <$ the Key "under" <* spc <*> pAppl []
+          <* guard (mk /= Pse) 
+    <|> Under <$ the Key "under" <* guard (mk /= Pse) <* spc <*> px
   pSubs = lol "where" pSub <|> pure ([] :-/ Stop)
-  pSub = ((::-) <$> ext (([] ,) <$> pGivens <* spc) <*> pMake <* spc <* eol)
+  pSub = ((::-) <$> ext (([] ,) <$> pGivens <* spc) <*> pMake pg px <* spc <* eol)
       ?> ((SubPGuff . fst) <$> ext (many (eat Just) <* eol))
   pGivens
-    =   id <$ the Key "given" <* spc <*> sep (Given <$> pAppl []) (spd (the Sym ","))
+    =   id <$ the Key "given" <* spc <*> sep (Given <$> px) (spd (the Sym ","))
     <|> pure []
 
 newFixities :: Bloc [LexL] -> FixityTable
@@ -295,3 +326,28 @@ pAppl' nae = penv >>= gimme where
     stup n = "(" ++ replicate (n - 1) ',' ++ ")"
     ptup ((_, p, _) : _) = p
     ptup [] = (0, 0) -- but this should never happen, right?
+
+pGrammar :: PF (String, [[GramBit]])
+pGrammar = (,) <$ spc <*> pNonTerminal
+               <* spc <* (the Sym "::=" <|> the Sym "=") <* spc
+               <*> sep pProduction (spd (the Sym "|"))
+
+pNonTerminal :: PF String
+pNonTerminal = id <$ the Sym "<" <*> (txt <$> kinda Uid) <* the Sym ">"
+
+pGramBit :: PF [GramBit]
+pGramBit = ((:[]) . Terminal . txt) <$> eat like
+       <|> ((:[]) . NonTerminal) <$> pNonTerminal
+       <|> brk '(' (round <$> pGramBit)
+       <|> brk '[' (squar <$> pGramBit)
+       <|> brk '{' (curly <$> pGramBit)
+  where
+    like t
+      | txt t == "<" = Nothing
+      | txt t == "|" = Nothing
+      | gappy t = Nothing
+      | islay t = Nothing
+      | otherwise = Just t
+    round ss = [Terminal "("] ++ ss ++ [Terminal ")"]
+    squar ss = [Terminal "["] ++ ss ++ [Terminal "]"]
+    curly ss = [Terminal "{"] ++ ss ++ [Terminal "}"]

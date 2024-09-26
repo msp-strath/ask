@@ -1,4 +1,4 @@
-{-# LANGUAGE TupleSections, LambdaCase, PatternSynonyms #-}
+{-# LANGUAGE TupleSections, LambdaCase, PatternSynonyms, RankNTypes, ScopedTypeVariables #-}
 
 module Language.Ask.ChkRaw where
 
@@ -29,6 +29,7 @@ import Language.Ask.HardwiredRules
 import Language.Ask.Progging
 
 tracy = const id
+tripe = trace
 
 type Anno =
   ( Status
@@ -478,7 +479,7 @@ ginger qz ((ty, (l, r)) : qs) g =
     (stan m s, (a, b)) : glom ((x, a) : m) plan
 
 
-pout :: LayKind -> Make Anno TmR -> AM (Odd String [LexL])
+pout :: forall t. PP t => LayKind -> Make Anno t -> AM (Odd String [LexL])
 pout k p@(Make mk g m (s, n) ps (h, b)) = let k' = scavenge b in case s of
   Keep -> do
     blk <- psout k' ps
@@ -486,7 +487,7 @@ pout k p@(Make mk g m (s, n) ps (h, b)) = let k' = scavenge b in case s of
              $ format k' blk)
              :-/ Stop
   Need -> do
-    g <- ppTmR AllOK g
+    g <- ppr g
     blk <- psout k' ps
     return $ ((show mk ++) . (" " ++) . (g ++) . (" ?" ++) . whereFormat b ps
              $ format k' blk)
@@ -504,16 +505,17 @@ pout k p@(Make mk g m (s, n) ps (h, b)) = let k' = scavenge b in case s of
    kws = [done mk b | b <- [False, True]]
    ((Key, p, s) : ls) `tense` n | elem s kws =
      (Key, p, done mk n) : ls
+   (x : ls) `tense` n = (x : ls)
    (l : ls) `prove` n = l : (ls `prove` n)
    [] `prove` n = [] -- should never happen
    
-   psout :: LayKind -> Bloc (SubMake Anno TmR) -> AM (Bloc String)
+   psout :: LayKind -> Bloc (SubMake Anno t) -> AM (Bloc String)
    psout k (g :-/ Stop) = return $ g :-/ Stop
    psout k (g :-/ SubPGuff [] :-\ h :-/ r) = psout k ((g ++ h) :-/ r)
    psout k (g :-/ p :-\ gpo) =
      (g :-/) <$> (ocato <$> subpout k p <*> psout k gpo)
 
-   subpout :: LayKind -> SubMake Anno TmR -> AM (Odd String [LexL])
+   subpout :: LayKind -> SubMake Anno t -> AM (Odd String [LexL])
    subpout _ (SubPGuff ls)
      | all gappy ls = return $ rfold lout ls "" :-/ Stop
      | otherwise = return $ ("{- " ++ rfold lout ls " -}") :-/ Stop
@@ -533,17 +535,17 @@ pout k p@(Make mk g m (s, n) ps (h, b)) = let k' = scavenge b in case s of
      return z
     where
      fish [] p = p
-     fish (Given h : gs) p = case my h of
+     fish (Given h : gs) p = case phy h of
        Nothing -> fish gs p
        Just h -> h |- fish gs p
-     givs :: [Given TmR] -> AM (String -> String)
+     givs :: [Given t] -> AM (String -> String)
      givs gs = traverse wallop gs >>= \case
        [] -> return id
        g : gs -> return $ 
          ("given " ++) . (g ++) . rfold comma gs (" " ++)
        where
-         wallop :: Given TmR -> AM String
-         wallop (Given g) = ppTmR AllOK g
+         wallop :: Given t -> AM String
+         wallop (Given g) = ppr g
          comma s f = (", " ++) . (s ++) . f
    whereFormat :: [LexL] -> Bloc x -> String -> String
    whereFormat ls xs pso = case span gappy ls of
@@ -759,6 +761,60 @@ chkTest (ls, (_,_,f) :$$ as) mv = do
       return . ("tested " ++) . rfold lout ls . (" = " ++) $ r
 
 
+chkParse :: Make () ParseThing -> AM (Make Anno ParseThing)
+chkParse (Make Pse (ParseProb c sm) m () ss (ls, rs)) = do
+  let prods (Gram c' ps) | c == c' = ps
+      prods _ = []
+      subs :: [GramBit] -> Bloc (SubMake () ParseThing)
+           -> AM (Maybe [String],Bloc (SubMake Anno ParseThing))
+      subs [] (ns :-/ Stop) = pure (Just [], ns :-/ Stop)
+      subs (Terminal q : gs) b = do
+        (qsm, ss) <- subs gs b
+        pure ((q :) <$> qsm, ss)
+      subs (NonTerminal c : gs) (ns :-/ (w ::- x) :-\ xs) = do
+        x <- chkParse x
+        (psm, x) <- pure $ case x of
+          Make Pse (ParseProb c' qm) m a _ _
+            | c == c' -> case ((lexAll . read) <$> qm, m, a) of
+              (Just (_ :-/ ys :-\ _), By _, (Keep, True)) ->
+                (Just (fmap txt (ys >>= unLay)), x)
+              _ -> (Nothing, x)
+          Make z g m _ ss subs ->
+            (Nothing, Make z g m (Junk (ParseNotTheWanted c), False) ss subs)
+        (qsm, xs) <- subs gs xs
+        pure ((++) <$> psm <*> qsm, ns :-/ (w ::- x) :-\ xs)
+      subs (NonTerminal c : gs) (ns :-/ Stop) = do
+        (_, xs) <- subs gs (ns :-/ Stop)
+        pure $
+          (Nothing, 
+           ns :-/ (mempty ::- Make Pse (ParseProb c Nothing) (Stub True) (Need, False)
+                  ([] :-/ Stop) ([], []))
+           :-\ xs)
+  ps <- foldMap prods <$> gamma
+  case m of
+    Stub b -> case ss of
+      (ns :-/ Stop) ->
+        pure $ Make Pse (ParseProb c sm) m (Keep, False) (ns :-/ Stop) (ls, rs)
+      _ -> gripe $ ParseStubSub
+    By (ParseProd p) -> case p `elem` ps of
+      False -> gripe $ NotAProd c p
+      True -> case sm of
+        Nothing -> gripe $ ParseNoString
+        Just s -> case lexAll (read s) of
+          _ :-/ ys :-\ _ -> do
+            (qsm, ss) <- subs p ss
+            pure $ case qsm of
+              Just qs -> if fmap txt (ys >>= unLay) == qs
+                then Make Pse (ParseProb c sm) m (Keep, True) ss (ls, rs)
+                else Make Pse (ParseProb c sm) m (Junk (ParseNoMake s), True) ss (ls, rs)
+              _ -> Make Pse (ParseProb c sm) m (Keep, False) ss (ls, rs)
+          _ -> gripe $ Mardiness
+    _ -> gripe $ Mardiness
+chkParse _ = gripe $ Mardiness
+
+blatParse :: Make Anno ParseThing -> AM String
+blatParse m = bifoldMap id (($ "") . rfold lout) <$> pout (Denty 1) m
+
 discharge :: [CxE] -> Tm -> Tm
 discharge zs t = go [] zs t where
   go sg [] t = rfold e4p sg t
@@ -834,6 +890,14 @@ askRawDecl (RawTest e mv, ls) =
     e <- ppGripe gr
     return $ "{- " ++ e ++ "\n" ++ rfold lout ls "\n-}")
   return
+askRawDecl (RawGrammar c ps, ls) = do
+  push $ Gram c ps
+  return $ rfold lout ls ""
+askRawDecl (RawParse m, ls) = cope (chkParse m)
+  (\ gr -> do
+    e <- ppGripe gr
+    return $ "{- " ++ e ++ "\n" ++ rfold lout ls "\n-}")
+  blatParse
 askRawDecl (RawSewage, []) = return ""
 askRawDecl (RawSewage, ls) = return $ "{- don't ask\n" ++ rfold lout ls "\n-}"
 askRawDecl (_, ls) = return $ rfold lout ls ""

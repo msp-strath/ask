@@ -181,6 +181,7 @@ keywords =
   , "module", "import", "deriving", "infix", "infixl", "infixr"
   , "prop", "prove", "proven", "by", "from", "given", "inductively", "define", "defined"
   , "test", "tested", "under"
+  , "grammar", "parse", "parsed"
   ]
 
 isIdTaily :: Char -> Bool
@@ -216,6 +217,10 @@ type LexL = Lex Lay
 type Line = [LexL] -- signal
 type Bloc = Odd [LexL] -- noise
 
+unLay :: LexL -> [LexL]
+unLay (T (_ :-! _), _ , _) = [] -- FIXME!
+unLay (T (LB o ls c), _, _) = (o : ls ++ [c]) >>= unLay
+unLay l = [l]
 
 heralds :: [String]
 heralds = ["where", "do", "of", "let"]
@@ -229,6 +234,10 @@ gappy (t, _, _) = case t of
   Ret -> True
   Cmm -> True
   _   -> False
+
+islay :: Lex f -> Bool
+islay (T _, _, _) = True
+islay _ = False
 
 pfirst :: [Lex0] -> Pos
 pfirst ((_, p, s) : _) = p

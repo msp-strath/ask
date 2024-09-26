@@ -49,6 +49,9 @@ data CxE -- what sort of thing is in the context?
   | Data
       Con         -- name of data type
       Context     -- constructor declarations
+  | Gram
+      Con         -- nonterminal symbol
+      [[GramBit]] -- productions
   deriving Show
 
 data BKind
@@ -94,6 +97,11 @@ data Gripe
   | NonCanonicalType Tm Con
   | BadFName String
   | Unification Con Con
+  | NotAProd Con [GramBit]
+  | ParseNoString
+  | ParseNotTheWanted Con
+  | ParseNoMake String
+  | ParseStubSub
   | FAIL
   deriving Show
 

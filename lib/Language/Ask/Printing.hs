@@ -27,6 +27,10 @@ instance Ord Wot where
   compare App _   = GT
   -- x <= y means you can put a y anywhere you can put an x with no parens
 
+class PP t where
+  ppr :: t -> AM String
+  phy :: t -> Maybe Tm
+
 pinx :: Int -> AM String
 pinx i = return $ "???"
 
@@ -56,6 +60,10 @@ readyTmR :: TmR -> Either Tm [LexL]
 readyTmR (My t) = Left t
 readyTmR (Our _ (ls, _)) = Right ls
 readyTmR (Your (ls, _)) = Right ls
+
+instance PP TmR where
+  ppr = ppTmR AllOK
+  phy = my
 
 ppTmR :: Spot -> TmR -> AM String
 ppTmR spot t = case readyTmR t of
@@ -204,7 +212,27 @@ ppGripe (Unification found expected) =
   return $ "I was compelled to expect " ++ show expected ++ "but I was given " ++ show found ++ " instead"
 ppGripe (NonCanonicalType ty con) =
   return $ show con ++ " is a constructor but I am not sure it should be there."
+ppGripe (NotAProd c gs) = do
+  p <- ppr (ParseProd gs)
+  g <- ppr (ParseProb c Nothing)
+  return $ "No production " ++ p ++ " for grammar " ++ g
+ppGripe ParseNoString = return "I can't check a production unless you tell me the input."
+ppGripe (ParseNotTheWanted c) = return $ concat
+  ["This isn't the ",c," I wanted."]
+ppGripe (ParseNoMake s) = return $ concat
+  ["This doesn't make ", s, "."]
+ppGripe ParseStubSub = return "Don't give subtrees until you've chosen a production."
 
 ppGripe FAIL = return $
   "It went wrong but I've forgotten how. Please ask a human for help."
 ppGripe g = return $ show g
+
+instance PP ParseThing where
+  ppr (ParseProb c m) = pure . concat $
+    ["<",c,">"] ++ case m of
+      Nothing -> []
+      Just s -> [" ", s]
+  ppr (ParseProd gs) = pure . intercalate " " $ fmap gb gs where
+    gb (Terminal t) = t
+    gb (NonTerminal c) = concat ["<",c,">"]
+  phy _ = Nothing
