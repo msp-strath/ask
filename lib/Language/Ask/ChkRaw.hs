@@ -29,7 +29,7 @@ import Language.Ask.HardwiredRules
 import Language.Ask.Progging
 
 tracy = const id
-tripe = trace
+tripe = const id
 
 type Anno =
   ( Status
@@ -765,6 +765,9 @@ chkParse :: Make () ParseThing -> AM (Make Anno ParseThing)
 chkParse (Make Pse (ParseProb c sm) m () ss (ls, rs)) = do
   let prods (Gram c' ps) | c == c' = ps
       prods _ = []
+      visi (Spc, _, _) = []
+      visi (Ret, _, _) = []
+      visi t = [t]
       subs :: [GramBit] -> Bloc (SubMake () ParseThing)
            -> AM (Maybe [String],Bloc (SubMake Anno ParseThing))
       subs [] (ns :-/ Stop) = pure (Just [], ns :-/ Stop)
@@ -777,7 +780,7 @@ chkParse (Make Pse (ParseProb c sm) m () ss (ls, rs)) = do
           Make Pse (ParseProb c' qm) m a _ _
             | c == c' -> case ((lexAll . read) <$> qm, m, a) of
               (Just (_ :-/ ys :-\ _), By _, (Keep, True)) ->
-                (Just (fmap txt (ys >>= unLay)), x)
+                (Just (fmap txt (ys >>= unLay >>= visi)), x)
               _ -> (Nothing, x)
           Make z g m _ ss subs ->
             (Nothing, Make z g m (Junk (ParseNotTheWanted c), False) ss subs)
@@ -804,7 +807,7 @@ chkParse (Make Pse (ParseProb c sm) m () ss (ls, rs)) = do
           _ :-/ ys :-\ _ -> do
             (qsm, ss) <- subs p ss
             pure $ case qsm of
-              Just qs -> if fmap txt (ys >>= unLay) == qs
+              Just qs -> if fmap txt (ys >>= unLay >>= visi) == qs
                 then Make Pse (ParseProb c sm) m (Keep, True) ss (ls, rs)
                 else Make Pse (ParseProb c sm) m (Junk (ParseNoMake s), True) ss (ls, rs)
               _ -> Make Pse (ParseProb c sm) m (Keep, False) ss (ls, rs)
