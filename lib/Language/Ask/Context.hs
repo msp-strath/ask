@@ -102,6 +102,7 @@ data Gripe
   | ParseNotTheWanted Con
   | ParseNoMake String
   | ParseStubSub
+  | Bland String
   | FAIL
   deriving Show
 

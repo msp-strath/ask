@@ -222,6 +222,7 @@ ppGripe (ParseNotTheWanted c) = return $ concat
 ppGripe (ParseNoMake s) = return $ concat
   ["This doesn't make ", s, "."]
 ppGripe ParseStubSub = return "Don't give subtrees until you've chosen a production."
+ppGripe (Bland x) = return x
 
 ppGripe FAIL = return $
   "It went wrong but I've forgotten how. Please ask a human for help."

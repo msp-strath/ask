@@ -793,6 +793,7 @@ chkParse (Make Pse (ParseProb c sm) m () ss (ls, rs)) = do
            ns :-/ (mempty ::- Make Pse (ParseProb c Nothing) (Stub True) (Need, False)
                   ([] :-/ Stop) ([], []))
            :-\ xs)
+      subs _ _ = gripe $ Bland "There's something I don't understand about this parse tree."
   ps <- foldMap prods <$> gamma
   case m of
     Stub b -> case ss of
