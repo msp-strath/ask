@@ -85,6 +85,7 @@ data Gripe
   | UnderNeedsEq Tm
   | NotGiven Tm
   | NotEqual
+  | InfiniteType
   | Terror [LexL] Tm Tm
   | NotARule Appl
   | BadRec String

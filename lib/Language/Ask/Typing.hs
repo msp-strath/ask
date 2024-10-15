@@ -423,14 +423,20 @@ subtype s t = do
   go s t
  where
   go s t | track ("SOOTY " ++ show s ++ " " ++ show t) False = undefined
-  go (TC "->" [s0, t0]) u = do
-    (s1, t1) <- makeFun u
-    subtype s1 s0
-    subtype t0 t1
-  go u (TC "->" [s1, t1]) = do
-    (s0, t0) <- makeFun u
-    subtype s1 s0
-    subtype t0 t1
+  go (TC "->" [s0, t0]) u =
+    if subTm u [s0, t0]
+    then gripe InfiniteType
+    else do
+      (s1, t1) <- makeFun u
+      subtype s1 s0
+      subtype t0 t1
+  go u (TC "->" [s1, t1]) =
+    if subTm u [s1, t1]
+    then gripe InfiniteType
+    else do
+      (s0, t0) <- makeFun u
+      subtype s1 s0
+      subtype t0 t1
   go (TC "$" [ty0, non0, num0]) (TC "$" [ty1, non1, num1]) = do
     unify Type ty0 ty1
     unify Zone non0 non1

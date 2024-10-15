@@ -70,6 +70,35 @@ type Nom = [(String, Int)]   -- names for parameters are chosen by the system
 
 
 ------------------------------------------------------------------------------
+--  Subterm Checking
+------------------------------------------------------------------------------
+
+class SubTm t where
+  subTm :: Tm -> t -> Bool
+
+instance SubTm Tm where
+  subTm s t | s == t = True
+  subTm s (TM _ ss) = subTm s ss
+  subTm s (TC _ ts) = subTm s ts
+  subTm s (TB b) = subTm s b
+  subTm s (TE e) = subTm s e
+
+instance SubTm Syn where
+  subTm s (tm ::: ty) = subTm s tm || subTm s ty
+  subTm s (e :$ t) = subTm s e || subTm s t
+  subTm _ _ = False
+
+instance SubTm t => SubTm [t] where
+  subTm = any . subTm
+
+instance SubTm t => SubTm (Bind t) where
+  subTm s (K b) = subTm s b
+  subTm s (L b) = subTm (s <^> o' mempty) b
+
+  
+
+
+------------------------------------------------------------------------------
 --  Patterns
 ------------------------------------------------------------------------------
 
