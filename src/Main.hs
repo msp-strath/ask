@@ -1,6 +1,15 @@
+{-# LANGUAGE LambdaCase #-}
+
 module Main where
+
+import System.Environment
+import Data.Traversable
 
 import Language.Ask.ChkRaw
 
 main :: IO ()
-main = interact filth
+main = getArgs >>= \case
+  [] -> interact filth
+  xs -> do
+    inp <- concat <$> traverse readFile xs
+    putStr $ filth inp

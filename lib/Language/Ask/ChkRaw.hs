@@ -198,7 +198,7 @@ chkProof g m ps src = do
             (MGiven,) <$> (given (TC "=" [ty, rhs, lhs])
                        <|> given (TC "=" [ty, lhs, rhs]))
           _ -> (MGiven,) <$> given gt
-        Tested b -> hnf gt >>= \case
+        Tested b -> testRun gt >>= \case
           TC "=" [ty, lhs, rhs] -> (Tested b, True) <$ tested ty lhs rhs
           _ -> gripe $ TestNeedsEq gt
         Under f -> hnf gt >>= \case

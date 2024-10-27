@@ -159,18 +159,19 @@ given goal = do
   go ga
  where
   go B0 = gripe $ NotGiven goal
-  go (ga :< Hyp b hyp) = cope (do
-    True <- trice ("TRYING " ++ show hyp) $ return True
-    doorStop
-    smegUp hyp
-    cope (unify (TC "Prop" []) hyp goal)
-      (\ gr -> trice "OOPS" $ gripe gr)
-      return
-    doorStep
-    True <- trice "BINGO" $ return True
-    return b
-    )
-    (\ gr -> go ga) return
+  go (ga :< Hyp b hyp) = cope (hy False)
+    (\ _ -> cope (hy True) (\gr -> go ga) return) return
+    where  -- this is ghastly
+    hy heh = do
+      True <- trice ("TRYING " ++ show hyp) $ return True
+      doorStop
+      smegUp hyp
+      cope (unify' heh (TC "Prop" []) hyp goal)
+        (\ gr -> trice "OOPS" $ gripe gr)
+        return
+      doorStep
+      True <- trice "BINGO" $ return True
+      return b
   go (ga :< _) = go ga
 
 

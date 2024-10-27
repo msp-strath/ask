@@ -120,6 +120,17 @@ norm t = hnf t >>= \case
   TC c ts -> TC c <$> traverse norm ts
   t -> return t
 
+testRun :: Tm -> AM Tm
+testRun t = hnf t >>= \case
+  TC c ts -> TC c <$> traverse testRun ts
+  TE s -> TE <$> testSyn s
+  t -> return t
+ where
+  testSyn :: Syn -> AM Syn
+  testSyn (e :$ s) = (:$) <$> testSyn e <*> testRun s
+  testSyn t = return t
+  
+
 unsize :: Tm -> AM Tm
 unsize ty = hnf ty >>= \case
   Sized ty _ _ -> return ty
@@ -462,75 +473,80 @@ makeFun ty = do
 --  Unification
 ------------------------------------------------------------------------------
 
-unify :: Tm -> Tm -> Tm -> AM ()
-unify ty a b = do  -- pay more attention to types
+unify = unify' True
+unify' :: Bool -> Tm -> Tm -> Tm -> AM ()
+unify' heh ty a b = do  -- pay more attention to types
   ty <- unsize ty
-  a <- hnf a
-  b <- hnf b
+  a <- if heh then hnf a else pure a
+  b <- if heh then hnf b else pure b
   True <- track (show a ++ " =? " ++ show b) (return True)
   case (a, b) of
     (TC "$" [a, TE (TP (z, _)), i], TC "$" [b, TE (TP (y, _)), j])
-      | z == y && i == j -> unify Type a b
+      | z == y && i == j -> unify' heh Type a b
     (TC f as, TC g bs) -> do
       guardErr (f == g) (Unification f g)
       tel <- constructor EXP ty f
-      unifies tel as bs
+      unifies' heh tel as bs
     (TE (TP xp), t) -> make xp t ty
     (s, TE (TP yp)) -> make yp s ty
-    (TE e, TE f) -> () <$ unifySyn e f
+    (TE e, TE f) -> () <$ unifySyn' heh e f
     _ -> cope (equal ty (a, b))
       (\ _ -> do
         True <- track (show a ++ " /= " ++ show b) $ return True
         gripe FAIL)
       return
 
-unifySyn :: Syn -> Syn -> AM Tm   --- eeeevil
-unifySyn (TP xp@(_, Hide ty)) e = do
+unfiySyn = unifySyn' True
+unifySyn' :: Bool -> Syn -> Syn -> AM Tm   --- eeeevil
+unifySyn' heh (TP xp@(_, Hide ty)) e = do
   ty <- eqSyn e e
   ty <$ make xp (TE e) ty
-unifySyn e (TP xp@(_, Hide ty)) = do
+unifySyn' heh e (TP xp@(_, Hide ty)) = do
   ty <- eqSyn e e
   ty <$ make xp (TE e) ty
-unifySyn (e :$ a) (f :$ b) = do
-  ty <- unifySyn e f >>= hnf
+unifySyn' heh (e :$ a) (f :$ b) = do
+  ty <- unifySyn' heh e f >>= hnf
   (dom, ran) <- makeFun ty
-  ran <$ unify dom a b
-unifySyn (TF (f, Hide sch) as bs) (TF (g, Hide _) cs ds) | f == g =
-  unifyFun sch (as , bs) (cs, ds)
-unifySyn (a ::: s) (b ::: t) = do
-  unify Type s t
-  unify s a b
+  ran <$ unify' heh dom a b
+unifySyn' heh (TF (f, Hide sch) as bs) (TF (g, Hide _) cs ds) | f == g =
+  unifyFun' heh sch (as , bs) (cs, ds)
+unifySyn' heh (a ::: s) (b ::: t) = do
+  unify' heh Type s t
+  unify' heh s a b
   return s
-unifySyn _ _ = gripe FAIL
+unifySyn' _ _ _ = gripe FAIL
 
-unifyFun :: Sch -> ([Tm], [Tm]) -> ([Tm], [Tm]) -> AM Tm
-unifyFun (Al s t) (a : as, bs) (c : cs, ds) = do
-  unify s a c
-  unifyFun (t // (a ::: s)) (as, bs) (cs, ds)
-unifyFun (iss :>> t) ([], bs) ([], ds) = go [] iss t bs ds where
+unifyFun = unifyFun' True
+unifyFun' :: Bool -> Sch -> ([Tm], [Tm]) -> ([Tm], [Tm]) -> AM Tm
+unifyFun' heh (Al s t) (a : as, bs) (c : cs, ds) = do
+  unify' heh s a c
+  unifyFun' heh (t // (a ::: s)) (as, bs) (cs, ds)
+unifyFun' heh (iss :>> t) ([], bs) ([], ds) = go [] iss t bs ds where
   go m [] t [] [] = return $ stan m t
   go m ((x, ty) : iss) t (b : bs) (d : ds) = do
     let ty' = stan m ty
-    unify ty' b d
+    unify' heh ty' b d
     go ((x, b) : m) iss t bs ds
   go _ _ _ _ _ = gripe FAIL
-unifyFun _ _ _ = gripe FAIL
+unifyFun' _ _ _ _ = gripe FAIL
 
-prepareSubQs :: Tel -> [Tm] -> [Tm] -> AM [((String, Tm), (Tm, Tm))]
-prepareSubQs (Pr _) [] [] = return []
-prepareSubQs (Ex s mo) (a : as) (b : bs) = do
-  unify s a b
-  prepareSubQs (mo // (a ::: s)) as bs
-prepareSubQs (xs :*: tel) (a : as) (b : bs) = do
-  sch <- prepareSubQs tel as bs
+prepareSubQs = prepareSubQs' True
+prepareSubQs' :: Bool -> Tel -> [Tm] -> [Tm] -> AM [((String, Tm), (Tm, Tm))]
+prepareSubQs' heh (Pr _) [] [] = return []
+prepareSubQs' heh (Ex s mo) (a : as) (b : bs) = do
+  unify' heh s a b
+  prepareSubQs' heh (mo // (a ::: s)) as bs
+prepareSubQs' heh (xs :*: tel) (a : as) (b : bs) = do
+  sch <- prepareSubQs' heh tel as bs
   return $ topInsert (xs, (a, b)) sch
 
-unifies :: Tel -> [Tm] -> [Tm] -> AM ()
-unifies tel as bs = prepareSubQs tel as bs >>= execute [] where
+unifies = unifies' True
+unifies' :: Bool -> Tel -> [Tm] -> [Tm] -> AM ()
+unifies' heh tel as bs = prepareSubQs' heh tel as bs >>= execute [] where
   execute :: Matching -> [((String, Tm), (Tm, Tm))] -> AM ()
   execute m [] = return ()
   execute m (((x, s), (a, b)) : sch) = do
-    unify (stan m s) a b
+    unify' heh (stan m s) a b
     execute ((x, a) : m) sch
 
 make :: (Nom, Hide Tm) -> Tm -> Tm -> AM ()

@@ -1,0 +1,351 @@
+------------------------------------------------------------------------------
+-- Degree of a Polynomial in One Variable
+------------------------------------------------------------------------------
+
+
+-- the data ------------------------------------------------------------------
+
+data Number
+  = Z          -- Z for zero is the lemon
+  | S Number   -- S for successor is a spud
+
+data Formula
+  = X
+  | Num Number
+  | Add Formula Formula
+  | Mul Formula Formula
+
+
+-- plus ----------------------------------------------------------------------
+
+plus :: Number -> Number -> Number
+defined plus n m inductively n where
+  defined plus n m from n where
+    defined plus Z m = m
+    defined plus (S x) m = S (plus x m)
+
+-- plus gives a monoid with Z ---------
+
+proven plus Z m = m tested
+
+proven plus n Z = n inductively n where
+  proven plus n Z = n from n where
+    given n = S x proven plus (S x) Z = S x tested
+
+proven plus (plus l n) m = plus l (plus n m) inductively l where
+  proven plus (plus l n) m = plus l (plus n m) from l where
+    given l = S x proven plus (plus (S x) n) m = plus (S x) (plus n m) tested
+
+-- plus is commutative ----------------
+
+proven plus m (S y) = S (plus m y) inductively m where
+  proven plus m (S y) = S (plus m y) from m where
+    given m = S x proven plus (S x) (S y) = S (plus (S x) y) tested
+
+proven plus n m = plus m n inductively n where
+  proven plus n m = plus m n from n where
+    given n = S x proven plus (S x) m = plus m (S x) tested where
+      proven S (plus x m) = plus m (S x) by Route (S (plus m x)) 
+
+-- swap middle of four ----------------
+
+proven plus (plus a b) (plus c d) = plus (plus a c) (plus b d)
+  by Route (plus a (plus b (plus c d))) where
+  proven plus a (plus b (plus c d)) = plus (plus a c) (plus b d)
+    by Route (plus a (plus c (plus b d))) where
+    proven plus a (plus b (plus c d)) = plus a (plus c (plus b d))
+      under plus where
+      proven plus b (plus c d) = plus c (plus b d)
+        by Route (plus (plus b c) d) where
+        proven plus (plus b c) d = plus c (plus b d)
+          by Route (plus (plus c b) d) where
+          proven plus (plus b c) d = plus (plus c b) d
+            under plus
+
+
+-- mult ----------------------------------------------------------------------
+
+mult :: Number -> Number -> Number
+defined mult n m inductively m where
+  defined mult n m from m where
+    defined mult n Z = Z
+    defined mult n (S x) = plus n (mult n x) 
+
+-- it should be a monoid map from addition to addition
+
+proven mult n Z = Z tested
+proven mult n (plus a b) = plus (mult n a) (mult n b) inductively a where
+  proven mult n (plus a b) = plus (mult n a) (mult n b) from a where
+    given a = S x proven mult n (plus (S x) b)
+                       = plus (mult n (S x)) (mult n b) tested where
+      proven plus n (mult n (plus x b))
+          = plus (plus n (mult n x)) (mult n b)
+          by Route (plus n (plus (mult n x) (mult n b))) where
+        proven plus n (mult n (plus x b)) 
+            = plus n (plus (mult n x) (mult n b))
+            under plus
+
+-- mult gives a monoid with (S Z) -----
+
+proven mult (S Z) m = m inductively m where
+  proven mult (S Z) m = m from m where
+    given m = S x proven mult (S Z) (S x) = S x tested
+
+proven mult n (S Z) = n tested
+
+proven mult (mult l n) m = mult l (mult n m) inductively m where
+  proven mult (mult l n) m = mult l (mult n m) from m where
+    given m = S x proven mult (mult l n) (S x) = mult l (mult n (S x)) tested where
+      proven plus (mult l n) (mult (mult l n) x) 
+          = mult l (plus n (mult n x)) 
+          by Route (plus (mult l n) (mult l (mult n x))) where
+        proven plus (mult l n) (mult (mult l n) x)
+            = plus (mult l n) (mult l (mult n x))
+            under plus
+
+-- mult distributes from the left -----
+
+proven mult Z m = Z inductively m where
+  proven mult Z m = Z from m
+
+proven mult (plus l n) m = plus (mult l m) (mult n m) inductively m where
+  proven mult (plus l n) m = plus (mult l m) (mult n m) from m where
+    given m = S x proven mult (plus l n) (S x) = plus (mult l (S x)) (mult n (S x)) tested where
+      proven plus (plus l n) (mult (plus l n) x)
+          = plus (plus l (mult l x)) (plus n (mult n x))
+         by Route (plus (plus l n) (plus (mult l x) (mult n x))) where
+        proven plus (plus l n) (mult (plus l n) x) = plus (plus l n) (plus (mult l x) (mult n x)) under plus
+
+
+-- max -----------------------------------------------------------------------
+
+max :: Number -> Number -> Number
+defined max n m inductively n where
+  defined max n m from n where
+    defined max Z m = m
+    defined max (S x) m from m where
+      defined max (S x) Z = S x
+      defined max (S x) (S y) = S (max x y)
+
+-- max gives a monoid with Z ----------
+
+proven max Z m = m tested
+
+proven max n Z = n from n
+
+proven max (max l n) m = max l (max n m) inductively l where
+  proven max (max l n) m = max l (max n m) from l where
+    given l = S x proven max (max (S x) n) m = max (S x) (max n m)
+      from n where
+      given n = S y proven max (max (S x) (S y)) m = max (S x) (max (S y) m)
+        from m where
+        given m = S z
+          proven max (max (S x) (S y)) (S z) = max (S x) (max (S y) (S z))
+            tested
+
+-- plus distributes over max ----------
+
+proven plus a (max b c) = max (plus a b) (plus a c) inductively a where
+  proven plus a (max b c) = max (plus a b) (plus a c) from a where
+    given a = S x
+      proven plus (S x) (max b c)
+           = max (plus (S x) b) (plus (S x) c) tested
+
+proven plus (max a b) c = max (plus a c) (plus b c) 
+  by Route (plus c (max a b)) where
+  proven plus c (max a b) = max (plus a c) (plus b c)
+    by Route (max (plus c a) (plus c b)) where
+    proven max (plus c a) (plus c b) = max (plus a c) (plus b c) under max
+
+-- mult districutes over max ----------
+
+proven mult n (max a b) = max (mult n a) (mult n b) inductively a where
+  proven mult n (max a b) = max (mult n a) (mult n b) from a where
+    given a = S x proven mult n (max (S x) b)
+                      = max (mult n (S x)) (mult n b) from b where
+      given b = S y proven mult n (max (S x) (S y))
+                        = max (mult n (S x)) (mult n (S y)) tested where
+        proven plus n (mult n (max x y))
+            = max (plus n (mult n x)) (mult n (S y))
+            by Route (plus n (max (mult n x) (mult n y))) where
+          proven plus n (mult n (max x y))
+               = plus n (max (mult n x) (mult n y))
+           under plus
+
+
+-- substitute ----------------------------------------------------------------
+
+substitute :: Formula -> Formula -> Formula
+defined substitute r p inductively p where
+  defined substitute r p from p where
+    defined substitute r X = r
+    defined substitute r (Num x) = Num x
+    defined substitute r (Add s t) = Add (substitute r s) (substitute r t)
+    defined substitute r (Mul s t) = Mul (substitute r s) (substitute r t)
+
+-- substitute gives a monoid with X ---
+
+proven substitute X q = q inductively q where
+  proven substitute X q = q from q where
+    given q = Add s t proven substitute X (Add s t) = Add s t tested
+    given q = Mul s t proven substitute X (Mul s t) = Mul s t tested
+    
+proven substitute p X = p tested
+
+proven substitute (substitute p q) r = substitute p (substitute q r)
+  inductively r where
+  proven substitute (substitute p q) r = substitute p (substitute q r)
+    from r where
+    given r = Add s t proven substitute (substitute p q) (Add s t) 
+                       = substitute p (substitute q (Add s t)) tested
+    given r = Mul s t proven substitute (substitute p q) (Mul s t)
+                           = substitute p (substitute q (Mul s t)) tested
+
+
+-- evaluate ------------------------------------------------------------------
+
+evaluate :: Formula -> Number -> Number
+defined evaluate p n inductively p where
+  defined evaluate p n from p where
+    defined evaluate X n = n
+    defined evaluate (Num m) n = m
+    defined evaluate (Add q r) n = plus (evaluate q n) (evaluate r n)
+    defined evaluate (Mul q r) n = mult (evaluate q n) (evaluate r n)
+
+-- evaluate is a monoid map from susbtitute to function composition
+
+proven evaluate (substitute r p) n = evaluate p (evaluate r n)
+  inductively p where
+  proven evaluate (substitute r p) n = evaluate p (evaluate r n) from p where
+    given p = Add s t proven evaluate (substitute r (Add s t)) n
+                           = evaluate (Add s t) (evaluate r n) tested where
+      proven plus (evaluate (substitute r s) n) (evaluate (substitute r t) n)
+           = plus (evaluate s (evaluate r n))   (evaluate t (evaluate r n))
+       under plus
+    given p = Mul s t proven evaluate (substitute r (Mul s t)) n
+                           = evaluate (Mul s t) (evaluate r n) tested where
+      proven mult (evaluate (substitute r s) n) (evaluate (substitute r t) n)
+           = mult (evaluate s (evaluate r n))   (evaluate t (evaluate r n))
+       under mult
+
+
+-- degree --------------------------------------------------------------------
+
+degree :: Formula -> Number
+defined degree p inductively p where
+  defined degree p from p where
+    defined degree X = S Z
+    defined degree (Num c) = Z
+    defined degree (Add q r) = max (degree q) (degree r)
+    defined degree (Mul q r) = plus (degree q) (degree r)
+
+-- degree is a monoid map from substitute to mult
+
+proven degree (substitute p q) = mult (degree p) (degree q)
+  inductively q where
+  proven degree (substitute p q) = mult (degree p) (degree q) from q where
+    given q = Add s t proven degree (substitute p (Add s t))
+                 = mult (degree p) (degree (Add s t)) tested where
+      proven max (degree (substitute p s)) (degree (substitute p t))
+         = mult (degree p) (max (degree s) (degree t))
+       by Route (max (mult (degree p) (degree s))
+                     (mult (degree p) (degree t))) where
+        proven max (degree (substitute p s))    (degree (substitute p t))
+             = max (mult (degree p) (degree s)) (mult (degree p) (degree t))
+         under max
+    given q = Mul s t proven degree (substitute p (Mul s t))
+                 = mult (degree p) (degree (Mul s t)) tested where
+      proven plus (degree (substitute p s)) (degree (substitute p t))
+         = mult (degree p) (plus (degree s) (degree t)) 
+             by Route (plus (mult (degree p) (degree s))
+                            (mult (degree p) (degree t))) where
+        proven plus (degree (substitute p s)) (degree (substitute p t)) 
+             = plus (mult (degree p) (degree s)) (mult (degree p) (degree t)) 
+         under plus
+
+
+-- diff ----------------------------------------------------------------------
+
+shift :: Formula -> Formula
+defined shift p = substitute (Add (Num (S Z)) X) p
+
+proven evaluate (shift p) n = evaluate p (S n) tested where
+  proven evaluate (substitute (Add (Num (S Z)) X) p) n = evaluate p (S n)
+    by Route (evaluate p (evaluate (Add (Num (S Z)) X) n))
+
+diff :: Formula -> Formula
+defined diff p inductively p where
+  defined diff p from p where
+    defined diff X = Num (S Z)
+    defined diff (Num c) = Num Z
+    defined diff (Add q r) = Add (diff q) (diff r)
+    defined diff (Mul q r) = Add (Mul (diff q) (shift r)) (Mul q (diff r))
+
+proven evaluate p (S n) = plus (evaluate (diff p) n) (evaluate p n)
+  inductively p where
+  proven evaluate p (S n) = plus (evaluate (diff p) n) (evaluate p n)
+    from p where
+    given p = Add q r
+      proven evaluate (Add q r) (S n)
+          = plus (evaluate (diff (Add q r)) n) (evaluate (Add q r) n)
+          tested where
+        proven plus (evaluate q (S n)) (evaluate r (S n))
+          = plus (plus (evaluate (diff q) n) (evaluate (diff r) n))
+                 (plus (evaluate q n)        (evaluate r n)) by Route
+           (plus (plus (evaluate (diff q) n) (evaluate q n))
+                 (plus (evaluate (diff r) n) (evaluate r n))) where
+          proven plus (evaluate q (S n)) (evaluate r (S n))
+               = plus (plus (evaluate (diff q) n) (evaluate q n))
+                      (plus (evaluate (diff r) n) (evaluate r n))
+              under plus
+    given p = Mul q r
+      proven evaluate (Mul q r) (S n)
+          = plus (evaluate (diff (Mul q r)) n) (evaluate (Mul q r) n) tested where
+      proven mult (evaluate q (S n)) (evaluate r (S n))
+          = plus
+             (plus (mult (evaluate (diff q) n) (evaluate (shift r) n))
+                   (mult (evaluate q n) (evaluate (diff r) n)))
+             (mult (evaluate q n) (evaluate r n)) 
+         by Route (mult (plus (evaluate (diff q) n) (evaluate q n))
+                        (evaluate r (S n))) where
+        proven mult (evaluate q (S n)) (evaluate r (S n))
+             = mult (plus (evaluate (diff q) n) (evaluate q n)) (evaluate r (S n))
+             under mult
+        proven mult (plus (evaluate (diff q) n) (evaluate q n)) (evaluate r (S n))
+             = plus (plus (mult (evaluate (diff q) n) (evaluate (shift r) n))
+                          (mult (evaluate q n) (evaluate (diff r) n)))
+               (mult (evaluate q n) (evaluate r n))
+          by Route
+             (plus (mult (evaluate (diff q) n) (evaluate (shift r) n))
+                   (plus       (mult (evaluate q n) (evaluate (diff r) n))
+               (mult (evaluate q n) (evaluate r n)))) where
+          proven mult (plus (evaluate (diff q) n) (evaluate q n)) (evaluate r (S n))
+              = plus (mult (evaluate (diff q) n) (evaluate (shift r) n))
+                 (plus (mult (evaluate q n) (evaluate (diff r) n))
+                       (mult (evaluate q n) (evaluate r n)))
+             by Route
+               (plus (mult (evaluate (diff q) n) (evaluate (shift r) n))
+                 (mult (evaluate q n)
+                   (plus (evaluate (diff r) n) (evaluate r n)))) where
+            proven mult (plus (evaluate (diff q) n) (evaluate q n)) (evaluate r (S n))
+                = plus (mult (evaluate (diff q) n) (evaluate (shift r) n))
+                    (mult (evaluate q n) (plus (evaluate (diff r) n) (evaluate r n)))
+               by Route (plus (mult (evaluate (diff q) n) (evaluate r (S n)))
+                              (mult (evaluate q n) (evaluate r (S n)))) where
+              proven plus (mult (evaluate (diff q) n) (evaluate r (S n)))
+                         (mult (evaluate q n) (evaluate r (S n)))
+                  = plus (mult (evaluate (diff q) n) (evaluate (shift r) n))
+                         (mult (evaluate q n) (plus (evaluate (diff r) n) (evaluate r n)))
+                 under plus where
+                proven mult (evaluate (diff q) n) (evaluate r (S n))
+                    = mult (evaluate (diff q) n) (evaluate (shift r) n)
+                    under mult
+                proven mult (evaluate q n) (evaluate r (S n))
+                    = mult (evaluate q n) (plus (evaluate (diff r) n) (evaluate r n))
+                    under mult
+            proven plus (mult (evaluate (diff q) n) (evaluate (shift r) n))
+                        (mult (evaluate q n) (plus (evaluate (diff r) n) (evaluate r n)))
+                 = plus (mult (evaluate (diff q) n) (evaluate (shift r) n))
+                        (plus (mult (evaluate q n) (evaluate (diff r) n))
+                              (mult (evaluate q n) (evaluate r n)))
+             under plus
