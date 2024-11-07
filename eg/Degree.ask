@@ -349,3 +349,31 @@ proven evaluate p (S n) = plus (evaluate (diff p) n) (evaluate p n)
                         (plus (mult (evaluate q n) (evaluate (diff r) n))
                               (mult (evaluate q n) (evaluate r n)))
              under plus
+
+
+sumFunBelow :: (Number -> Number) -> (Number -> Number)
+defined sumFunBelow f n inductively n where
+  defined sumFunBelow f n from n where
+    defined sumFunBelow f Z = Z
+    defined sumFunBelow f (S x) = plus (f x) (sumFunBelow f x)
+
+proven evaluate p n = plus (sumFunBelow (evaluate (diff p)) n) (evaluate p Z)
+  inductively n where
+  proven evaluate p n = plus (sumFunBelow (evaluate (diff p)) n) (evaluate p Z)
+    from n where
+    given n = S x proven evaluate p (S x)
+                      = plus (sumFunBelow (evaluate (diff p)) (S x)) (evaluate p Z)
+                  tested where
+      proven evaluate p (S x) =
+        plus (plus (evaluate (diff p) x) (sumFunBelow (evaluate (diff p)) x)) (evaluate p Z)
+        by Route
+          (plus (evaluate (diff p) x)
+            (plus (sumFunBelow (evaluate (diff p)) x) (evaluate p Z))) where
+        proven evaluate p (S x)
+            = plus (evaluate (diff p) x)
+                   (plus (sumFunBelow (evaluate (diff p)) x) (evaluate p Z))
+           by Route (plus (evaluate (diff p) x) (evaluate p x)) where
+          proven plus (evaluate (diff p) x) (evaluate p x)
+              = plus (evaluate (diff p) x)
+                    (plus (sumFunBelow (evaluate (diff p)) x) (evaluate p Z))
+             under plus

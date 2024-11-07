@@ -75,7 +75,11 @@ chkProg p gr mr ps src@(h,b) = do
       ga <- gamma
       for (paranoia ga []) $ \ x -> push $ RecShadow x
       traverse push (localCx p)
+      push RefuseQuantification
       a@(Our t _) <- elabTmR (rightTy p) a
+      pop $ \ x -> case x of
+        RefuseQuantification -> True
+        _ -> False
       True <- tracy ("IS SO " ++ show t) $ return True
       (PC _ ps, sb) <- patify $ TC "" (map fst (leftImpl p ++ leftSatu p ++ leftAppl p))
       True <- tracy ("PATIFIED " ++ show ps ++ show sb) $ return True

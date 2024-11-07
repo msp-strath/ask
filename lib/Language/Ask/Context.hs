@@ -25,6 +25,7 @@ import Language.Ask.Tm
 import Language.Ask.Lexing
 import Language.Ask.RawAsk
 
+import Debug.Trace
 
 ------------------------------------------------------------------------------
 --  Contexts
@@ -40,6 +41,7 @@ data CxE -- what sort of thing is in the context?
   | Defined String
   | RecShadow String
   | ImplicitQuantifier
+  | RefuseQuantification
   | (Con, [Pat]) ::> (Con, Tel)  -- constructor declaration
   | ByRule Bool{- pukka intro?-} Rule
   | Demand Subgoal
@@ -250,6 +252,7 @@ what's x = do
 --  decl (ga :< Declare y yn sch) | x == y = Just (yn, sch)
 --  decl (ga :< _) = decl ga
 --  decl B0 = Nothing
+  qu ga@(_ :< RefuseQuantification) = gripe (Scope x)
   qu ga@(_ :< ImplicitQuantifier) = do
     xTp <- (, Hide Type) <$> fresh "Ty"
     let xTy = TE (TP xTp)
