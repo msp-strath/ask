@@ -101,6 +101,7 @@ hnfSyn' (t ::: ty) = do
   return (t ::: ty)
 hnfSyn' (f :$ s) = hnfSyn f >>= \case
   (TB b ::: TC "->" [dom, ran]) -> return ((b // (s ::: dom)) ::: ran)
+  (TE e ::: _) -> return (e :$ s)
   f -> return (f :$ s)
 hnfSyn' e | track ("HNFSYN " ++ show e) True = return e
 
