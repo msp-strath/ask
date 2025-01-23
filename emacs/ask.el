@@ -5,29 +5,29 @@
 ;; syntax table
 ;;(defvar hacky-syntax-table (make-syntax-table))
 
-(defface labmate-directive
+(defface ask-primary-keyword
   '((t :foreground "black"
-       :background "pale turquoise"
+       :background "orange"
        :weight bold
        ))
-  "Face for directives."
-  :group 'labmate )
+  "Face for keywords (prove, define)."
+  :group 'ask )
 
-(defface labmate-response-delimiter
+(defface ask-assumption
   '((t :foreground "black"
-       :background "pale green"
-       ))
-  "Face for response delimiters."
-  :group 'labmate )
-
-
-(defface labmate-response-error
-  '((t :foreground "black"
-       :background "light salmon"
+       :background "orchid"
        :weight bold
        ))
-  "Face for errorneous directive responses."
-  :group 'labmate )
+  "Face for given."
+  :group 'ask )
+
+
+(defface ask-secondary-keyword
+  '((t :foreground "black"
+       :weight bold
+       ))
+  "Face for \"glue\" keywords (by, where, ...)."
+  :group 'ask )
 
 (defface ask-response-success
   '((t :foreground "black"
@@ -35,18 +35,27 @@
        :weight bold
        ))
   "Face for successful directive responses."
-  :group 'labmate )
+  :group 'ask )
+
+(defvar ask-syntax-table
+  (let ((st (make-syntax-table)))
+    ;; comments based on https://stackoverflow.com/questions/20731684/elisp-syntax-table-comments-for-haskell-style-comments
+    (modify-syntax-entry ?\{  "(}1nb" st)
+    (modify-syntax-entry ?\}  "){4nb" st)
+    (modify-syntax-entry ?-  "_ 123" st)
+    (modify-syntax-entry ?\n ">" st)
+    st))
 
 ;; define the mode
 (define-derived-mode ask-mode fundamental-mode
   "ask mode"
   ;; handling comments
-  :syntax-table (make-syntax-table)
+  :syntax-table ask-syntax-table
   ;; code for syntax highlighting
-  (font-lock-add-keywords nil '(("^\s*\\(proven\\|defined\\)[[:space:]]+" . (1 'ask-response-success))))
-  (font-lock-add-keywords nil '(("^\s*%>[^%\n]+" 0 'labmate-directive t)))
-  (font-lock-add-keywords nil '(("^\s*%<.+" . 'labmate-response-error)))
-  (font-lock-add-keywords nil '(("^\s*%<[{}]$" . 'labmate-response-delimiter)))
+  (font-lock-add-keywords nil '(("^\s*\\(given.*\\)?\\(proven\\|defined\\)[[:space:]]+" . (2 'ask-response-success))))
+  (font-lock-add-keywords nil '(("^\s*\\(prove\\|define\\)[[:space:]]+" . (1 'ask-primary-keyword))))
+  (font-lock-add-keywords nil '(("\\(data\\|prop\\|where\\|from\\|by\\|inductively\\)" . (1 'ask-secondary-keyword))))
+  (font-lock-add-keywords nil '(("^\s*\\(given\\)[[:space:]]+" . (1 'ask-assumption))))
   ;; Fold generated code
   ;; (hs-minor-mode)
 
