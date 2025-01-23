@@ -53,7 +53,7 @@
   :syntax-table ask-syntax-table
   ;; code for syntax highlighting
   (font-lock-add-keywords nil '(("^\s*\\(given.*\\)?\\(proven\\|defined\\)[[:space:]]+" . (2 'ask-response-success))))
-  (font-lock-add-keywords nil '(("^\s*\\(prove\\|define\\)[[:space:]]+" . (1 'ask-primary-keyword))))
+  (font-lock-add-keywords nil '(("^\s*\\(given.*\\)?\\(prove\\|define\\)[[:space:]]+" . (2 'ask-primary-keyword))))
   (font-lock-add-keywords nil '(("\\(data\\|prop\\|where\\|from\\|by\\|inductively\\)" . (1 'ask-secondary-keyword))))
   (font-lock-add-keywords nil '(("^\s*\\(given\\)[[:space:]]+" . (1 'ask-assumption))))
   ;; Fold generated code
