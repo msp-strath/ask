@@ -1,0 +1,8 @@
+-- Some examples to exercise the emacs mode syntax highlighting
+-- (incomplete, as of 31 Jan 2025)
+
+proven a -> a by ImpI
+proven b -> b given
+
+proven a -> a & a by ImpI where
+  given a proven a & a by AndI

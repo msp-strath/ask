@@ -56,8 +56,7 @@
   (font-lock-add-keywords nil '(("^\s*\\(given.*\\)?\\(prove\\|define\\)[[:space:]]+" . (2 'ask-primary-keyword))))
   (font-lock-add-keywords nil '(("\\(data\\|prop\\|where\\|from\\|by\\|inductively\\|tested\\|test\\|under\\)" . (1 'ask-secondary-keyword))))
   (font-lock-add-keywords nil '(("^\s*\\(given\\)[[:space:]]+" . (1 'ask-assumption))))
-  ;; Fold generated code
-  ;; (hs-minor-mode)
+  (font-lock-add-keywords nil '(("[[:space:]]+\\(given\\)\s*$" . (1 'ask-secondary-keyword))))
 
   (setq mode-name "ask")
 )
