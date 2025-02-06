@@ -2,12 +2,9 @@ proven a & b -> b & a by ImpI where
   given a & b proven b & a from a & b where
     given a, b proven b & a by AndI
 
-prove a | (a -> False) by Contradiction where
-  {- I don't see why you need this
-  given (a | (a -> False)) -> False prove False from (a | (a -> False)) -> False where
-    prove a | (a -> False) by OrIR where
-      prove a -> False by ImpI where
-        given a prove False from (a | (a -> False)) -> False where
-          prove a | (a -> False) by OrIL
-  -}
-  given Not (a | (a -> False)) prove False ?
+proven a | (a -> False) by Contradiction where
+  given Not (a | (a -> False)) proven False from Not (a | (a -> False)) where
+    proven a | (a -> False) by OrIR where
+      proven a -> False by ImpI where
+        given a proven False from Not (a | (a -> False)) where
+          proven a | (a -> False) by OrIL
