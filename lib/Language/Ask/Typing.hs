@@ -309,7 +309,10 @@ elabEq lhs rhs = do
         return $ TC "=" [sy, lhs, TE e]
       _ -> do
         ty <- TE <$> hole Type
-        lhs <- elabTm EXP ty lhs
+        lhs <- cope (elabTm EXP ty lhs)
+          (\ _ -> elabTm EXP ty rhs >> elabTm EXP ty lhs
+          )
+          return
         rhs <- elabTm EXP ty rhs
         ty <- norm ty
         return $ TC "=" [ty, lhs, rhs]
@@ -768,7 +771,7 @@ constructor m ty con = cope
   (\ _ ->  do
     (d, ss) <- hnf ty >>= \case
       TC d ss -> return (d, ss)
-      ty -> (foldMap cand <$> gamma) >>= \case
+      ty -> (foldMap (conCand con) <$> gamma) >>= \case
         [(p, tel)] -> do
           (TC d ss, m) <- splat Type p
           subtype (TC d ss) ty
@@ -787,10 +790,12 @@ constructor m ty con = cope
   try d ss c (Data _ de) =
     concat <$> traverse (try d ss c) de
   try _ _ _ _ = return []
+  {-
   cand :: CxE -> [(Pat, Tel)]
   cand ((c, ps) ::> (k, tel)) | k == con = [(PC c ps, tel)]
   cand (Data _ de) = foldMap cand de
   cand _ = []
+  -}
   splat :: Tm -> Pat -> AM (Tm, Matching)
   splat ty (PM x _{- er? -}) = do
     y <- hole ty
@@ -811,6 +816,11 @@ constructor m ty con = cope
     return (t : ts, m)
   splats m (Pr _) [] = return ([], m)
   splats _ _ _ = gripe FAIL
+
+conCand :: Con -> CxE -> [(Pat, Tel)]
+conCand con ((c, ps) ::> (k, tel)) | k == con = [(PC c ps, tel)]
+conCand con (Data _ de) = foldMap (conCand con) de
+conCand _ _ = []
 
 -- FIXME: don't assume quite so casually that things are covariant functors
 weeer :: Con  -- type constructor to be monkeyed
@@ -859,7 +869,8 @@ tested ty lhs rhs = flip (cope (equal ty (lhs, rhs))) return $ \ _ -> do
   lhs <- hnf lhs
   rhs <- hnf rhs
   case (ty, lhs, rhs) of
-    (_, TC a _, TC b _) | a /= b -> demand . PROVE $ FALSE
+    (TC d _, TC a _, TC b _)
+      | a /= b && d /= "Prop" -> demand . PROVE $ FALSE
     (_, TC c ss, TC d ts) | c == d -> do
       tel <- constructor EXP ty c
       testSubterms tel ss ts

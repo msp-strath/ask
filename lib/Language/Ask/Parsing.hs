@@ -59,7 +59,7 @@ kinda t = eat $ \ l@(u, _, _) -> do guard $ u == t ; return l
 brk :: Char -> ParTok e x -> ParTok e x
 brk c p = ParTok $ \ e ls -> case ls of
   (l@(T (LB (Sym, _, [o]) ks _), _, _) : ls) | c == o ->
-    [([l], x, ls) | (_, x, []) <- parTok p e ks]
+    [([l], x, ls) | (_, x, []) <- parTok (spd p) e ks]
   _ -> []
 
 spc :: ParTok e ()

@@ -204,7 +204,11 @@ chkProof g m ps src = do
           _ -> (MGiven,) <$> given gt
         Tested b -> testRun gt >>= \case
           TC "=" [ty, lhs, rhs] -> (Tested b, True) <$ tested ty lhs rhs
-          _ -> gripe $ TestNeedsEq gt
+          _ -> do
+            gt <- norm gt
+            demand (PROVE gt)
+            return (Tested b, True)
+            -- gripe $ TestNeedsEq gt
         Under f -> hnf gt >>= \case
           TC "=" [ty, lhs, rhs] -> (Under (Your f), True) <$ under lhs rhs f
           _ -> gripe $ UnderNeedsEq gt
