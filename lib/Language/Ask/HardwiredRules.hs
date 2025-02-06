@@ -68,6 +68,11 @@ myWeirdRules =
        , TE ((TM "g" mempty ::: TC "->" [TM "S" mempty, TM "T" mempty]) :$ TE (TV 0))
        ]
     ]
+  , (PC "=" [PC "Prop" [], PM "p" mempty, PM "q" mempty],
+     ("Equivalence", Pr [])) :<=
+      [ GIVEN (TM "p" []) . PROVE $ TM "q" []
+      , GIVEN (TM "q" []) . PROVE $ TM "p" []
+      ]
   ]
 
 myContext :: Context
