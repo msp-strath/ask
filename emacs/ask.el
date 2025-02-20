@@ -111,7 +111,7 @@
     (read-string (concat "Replace " q " by: ")))))
   (save-excursion
     (beginning-of-line)
-    (query-replace query replace)))
+    (query-replace query replace t)))
 
 (define-key ask-mode-map (kbd "<tab>") 'ask-run)
 (define-key ask-mode-map (kbd "C-c C-r") 'ask-replace-current-word-query)
