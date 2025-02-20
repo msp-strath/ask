@@ -102,6 +102,18 @@
   (ask-run-on-file (shell-quote-argument (buffer-file-name)))
 )
 
+(defun ask-replace-current-word-query (query replace)
+  "Replace current word with prompted word."
+  (interactive
+   (let ((q (current-word)))
+   (list
+    q
+    (read-string (concat "Replace " q " by: ")))))
+  (save-excursion
+    (beginning-of-line)
+    (query-replace query replace)))
+
 (define-key ask-mode-map (kbd "<tab>") 'ask-run)
+(define-key ask-mode-map (kbd "C-c C-r") 'ask-replace-current-word-query)
 
 (provide 'ask-mode)
