@@ -871,7 +871,7 @@ tested ty lhs rhs = flip (cope (equal ty (lhs, rhs))) return $ \ _ -> do
   case (ty, lhs, rhs) of
     (TC d _, TC a _, TC b _)
       | a /= b && d /= "Prop" -> demand . PROVE $ FALSE
-    (_, TC c ss, TC d ts) | c == d -> do
+    (TC t _, TC c ss, TC d ts) | c == d && t /= "Prop" -> do
       tel <- constructor EXP ty c
       testSubterms tel ss ts
     _ -> do
