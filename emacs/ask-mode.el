@@ -1,3 +1,4 @@
+;;; ask-mode.el --- Major mode for Ask
 ;;(require 'compile)
 
 ;; based on: http://ergoemacs.org/emacs/elisp_syntax_coloring.html
