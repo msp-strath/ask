@@ -1,0 +1,131 @@
+\documentclass{article}
+\usepackage{a4}
+\usepackage{pig}
+\ColourEpigram
+
+\DeclareMathAlphabet{\mathkw}{OT1}{cmss}{bx}{n}
+\newcommand{\ask}{\texttt{ask}}
+\newcommand{\by}{\mathkw{by}}
+\newcommand{\from}{\mathkw{from}}
+\newcommand{\data}{\mathkw{data}}
+\newcommand{\given}{\mathkw{given}}
+\newcommand{\where}{\mathkw{where}}
+\newcommand{\prove}{\mathkw{prove}}
+\newcommand{\proven}{\mathkw{proven}}
+\newcommand{\define}{\mathkw{define}}
+\newcommand{\defined}{\mathkw{defined}}
+\newcommand{\D}[1]{\mathsf{\blue{#1}}}
+\newcommand{\C}[1]{\mathsf{\red{#1}}}
+\newcommand{\V}[1]{\mathit{\purple{#1}}}
+\newcommand{\hab}{\:::\:}
+\newcommand{\qm}{\mathkw{?}}
+\newcommand{\Pf}{\D}
+
+\begin{document}
+\title{dreaming about \ask}
+\author{conor mc bride}
+\maketitle
+
+The current status of this document is `barely started speculative fiction', concerning the total programming language and proof assistant, \ask. Version one of \ask{} is totally a thing, but I'm plotting a do-over.
+
+
+\section{what's the point?}
+
+I designed \ask{} to be a problem-directed proof and programming system for absolute beginners. Key concerns include the following.
+\begin{itemize}
+\item Where it does not strain a point, the syntax should resemble that of Haskell. It should lead into learning Haskell.
+\item The document should read as the minutes of a problem solving interaction. All communication should be within the document. No evaporating information!
+\item Programming and proof should, as activities, resemble each other as closely as possible. The difference is that proving foregrounds the proposition (the type of the proof), while defining foregrounds the definiendum (the thing with the type).
+\item Classical logic should be supported no the proof side, but should stick out like a sore thumb.
+\item Mathematical structure should be distinct from overloading.
+\end{itemize}
+
+You can already tell from the above that I'm unlikely to be happy with any of the systems available off the shelf. Also, I want a thing that's mine to monkey with.
+
+
+\section{the basic picture}
+
+An \ask{} document is an ordered sequence of declarations and solutions. A solution is a tree which looks like
+\[\begin{array}{l}
+\mathit{problem}\quad\mathit{strategy}\quad\where\\
+\qquad\mathit{subsolution}_1\\
+\qquad\qquad\vdots\\
+\qquad\mathit{subsolution}_n\\
+\end{array}\]
+
+A \emph{problem} is always introduced by a keyword. Keywords come in two variants: imperative and past participle:
+\[\begin{array}{rcc}
+\mbox{task} & \mbox{imperative} & \mbox{part participle} \\
+\mbox{definition} & \define & \defined\\
+\mbox{proof} & \prove & \proven
+\end{array}\]
+The imperative is used for problems with some active task remaining (including the completion of any earlier task on which a solution may depend). The past participle is used in solutions which are hereditarily complete. The keyword is then followed by a problem statement which for definition looks like a `left-hand side' in functional programming, and for proof is the statement of a proposition.
+
+A \emph{strategy} is always introduced by a keyword (or symbol). The main proof strategy is $\by$, invoking some sort of inference rule of introduction. The main programming strategy is to state an equation, so that the whole thing looks like a line of Haskell. Common to both is the $\from$ strategy, which deploys elimination behaviour. There are other strategies, but we'll get there in good time.
+
+A \emph{subsolution} may begin with $\given$, indicating that some proposition holds locally hypothetically, or stating the type of a variable being brought into scope. The latter should be suppressed by default, but permitted. If the user writes $\V{x}\hab$ without giving the type, \ask{} should fill the type in, by return.
+
+
+\section{data declaration problems}
+
+The workhorse of \ask{} is the inductive data type. A type constructor
+is an identifier with a capital initial or an infix operator beginning
+with a colon. Data types offer a choice of value constructors, with
+the same identifier convention as type constructors --- a capital
+thing is a proper noun, standing only for itself. Haskell notation is supported.
+\[
+\data\quad \D{Tree}\;\V{a}\quad = \quad \C{Leaf}\quad
+  | \quad \C{Node}\;(\D{Tree}\;\V{a})\;\V{a}\;(\D{Tree}\;\V{a})
+\]
+
+But let us consider possible variations! The first is simply to allow \emph{naming}
+\[
+\data\quad \V{xt}\hab\D{Tree}\;\V{a}\quad = \quad \C{Leaf}\quad
+  | \quad \C{Node}\;(\V{xlt}\hab\D{Tree}\;\V{a})\;(\V{x}\hab\V{a})\;(\V{xrt}\hab\D{Tree}\;\V{a})
+\]
+One motivation is to explain suffix naming conventions for the type. The identifier in the declaration of the type constructor says what we consider typical elements to be called; those in the value constructor name the parts. The longest common prefix of these names (e.g., $\V{x}$) above stands for any prefix, and the remaining suffices can be matched for and applied, so that a tree called $\V{foot}$, when split, gets a case for $\C{Node}\;\V{foolt}\;\V{foo}\;\V{foort}$.
+
+Note that we should also allow type signatures on parameters/indices:
+\[
+\data\quad \D{Tree}\;(\V{a}\hab\D{Type}) = \cdots
+\]
+
+In a minor variation from Haskell, the declaration of an empty type must have an $=$ sign, with nothing thereafter, because it is the innermost \emph{strategy} for data type construction, namely to offer a choice of value constructors. What are other strategies?
+
+Firstly, let us allow the empty strategy.
+\[\begin{array}{l}
+\data\quad \D{Tree}\;(\V{a}\hab\D{Type}) \quad \where\\
+\qquad \D{Tree}\;\V{a}\quad \qm \\
+\qquad \D{Tree}\;\V{a}\quad \qm \\
+\end{array}\]
+We may make as many copies of the problem as we like (zero? probably), meaning that the type is their union. E.g.,
+\[\begin{array}{l}
+\data\quad \D{Tree}\;(\V{a}\hab\D{Type}) \quad \where\\
+\qquad \data\quad\D{Tree}\;\V{a}\quad = \quad \C{Leaf}\\
+\qquad \data\quad\D{Tree}\;\V{a}\quad = \quad \C{Node}\;(\D{Tree}\;\V{a})\;\V{a}\;(\D{Tree}\;\V{a}) \\
+\end{array}\]
+
+But now we can consider allowing $\from$ on indices which happen to be data.
+\[\begin{array}{l}
+\data\quad\D{Vec}\;(\V{n}\hab\D{Number})\;(\V{a}\hab\D{Type})\quad\from\;\V{n}\\
+\quad \data\quad\D{Vec}\;\C{Z}\;\V{a} \quad = \quad \C{Nil} \\
+\quad \data\quad\D{Vec}\;(\C{S}\;\V{n})\;\V{a} \quad = \quad
+  \C{Cons}\;\V{a}\;(\D{Vec}\;\V{n}\;\V{a}) \\
+\end{array}\]
+
+Where I'm going with this is to allow \emph{refinement}. We have
+enough places we can write $\where$ clauses that we can indicate proof
+problems which must be discharged whenever we seek to use the
+constructor, and which are exposed as $\given$ when $\from$ splits
+data. Here's one I made earlier
+\[\begin{array}{l}
+\data \quad \D{BST}\;\V{l}\;\V{u}\quad\where\\
+\quad \data \quad \D{BST}\;\V{l}\;\V{u}\quad = \quad \C{Leaf}\quad\where\\
+\quad \quad \prove\quad \Pf{Le}\;\V{l}\;\V{u}\\
+\quad \data \quad \D{BST}\;\V{l}\;\V{u}\quad = \quad
+\C{Node}\;(\D{BST}\;\V{l}\;(\C{Val}\;\V{k})) \;(\V{k}\hab\D{Key})\;
+  (\D{BST}\;(\C{Val}\;\V{k})\;\V{u})
+\end{array}\]
+Note that $\V{k}$ is used left of its declaration and I don't care.
+
+\end{document}
