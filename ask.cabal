@@ -22,7 +22,13 @@ name:               ask
 --                  | | | +--- code changes with no API change
 version:            0.1.0.0
 
-tested-with: GHC ==9.8.2 || ==9.6.6 || ==9.4.8 || ==9.2.8
+tested-with:
+  GHC ==9.12.2
+   || ==9.10.2
+   || ==9.8.2
+   || ==9.6.4
+   || ==9.4.8
+   || ==9.2.8
 
 -- A short (one-line) description of the package.
 -- synopsis:
@@ -81,9 +87,9 @@ library
     -- other-extensions:
 
     -- Other library packages from which modules are imported.
-    build-depends:    base >=4.16 && <=4.21
+    build-depends:    base >=4.16 && <=4.22
                     , mtl >=2.2 && <2.4
-                    , containers >= 0.6 && <0.7
+                    , containers >= 0.6 && <0.8
 
     -- Directories containing source files.
     hs-source-dirs:   lib
@@ -106,7 +112,7 @@ executable ask
 
     -- Other library packages from which modules are imported.
     build-depends: ask
-                 , base >=4.16 && <=4.21
+                 , base >=4.16 && <=4.22
 
     -- Directories containing source files.
     hs-source-dirs:   src
@@ -138,4 +144,4 @@ test-suite ask-test
 
     -- Test dependencies.
     build-depends: ask
-                 , base >=4.16 && <=4.21
+                 , base >=4.16 && <=4.22
