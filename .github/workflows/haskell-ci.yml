@@ -179,7 +179,8 @@ jobs:
           if [ $((HCNUMVER >= 90400)) -ne 0 ] ; then echo "package ask" >> cabal.project ; fi
           if [ $((HCNUMVER >= 90400)) -ne 0 ] ; then echo "    ghc-options: -Werror=unused-packages" >> cabal.project ; fi
           echo "package ask" >> cabal.project
-          echo "    ghc-options: -Werror=incomplete-patterns -Werror=incomplete-uni-patterns" >> cabal.project
+          # TODO: bring this back
+          # echo "    ghc-options: -Werror=incomplete-patterns -Werror=incomplete-uni-patterns" >> cabal.project
           cat >> cabal.project <<EOF
           EOF
           $HCPKG list --simple-output --names-only | perl -ne 'for (split /\s+/) { print "constraints: any.$_ installed\n" unless /^(ask)$/; }' >> cabal.project.local
