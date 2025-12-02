@@ -15,8 +15,9 @@
 name: Haskell-CI
 on:
   - push
-  - pull_request
-  - merge_group
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   linux:
     name: Haskell-CI - Linux - ${{ matrix.compiler }}
