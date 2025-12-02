@@ -433,8 +433,8 @@ elabFun cm f az (iss :>> t) as = do
 
 subtype :: Tm -> Tm -> AM ()
 subtype s t = do
-  s <- hnf s
-  t <- hnf t
+  s <- {-hnf-} norm s
+  t <- {-hnf-} norm t
   go s t
  where
   go s t | track ("SOOTY " ++ show s ++ " " ++ show t) False = undefined
@@ -500,7 +500,7 @@ unify' heh ty a b = do  -- pay more attention to types
         gripe FAIL)
       return
 
-unfiySyn = unifySyn' True
+unifySyn = unifySyn' True
 unifySyn' :: Bool -> Syn -> Syn -> AM Tm   --- eeeevil
 unifySyn' heh (TP xp@(_, Hide ty)) e = do
   ty <- eqSyn e e

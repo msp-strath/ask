@@ -17,6 +17,7 @@
 \newcommand{\D}[1]{\mathsf{\blue{#1}}}
 \newcommand{\C}[1]{\mathsf{\red{#1}}}
 \newcommand{\V}[1]{\mathit{\purple{#1}}}
+\newcommand{\F}[1]{\mathrm{\green{#1}}}
 \newcommand{\hab}{\:::\:}
 \newcommand{\qm}{\mathkw{?}}
 \newcommand{\Pf}{\D}
@@ -127,5 +128,47 @@ data. Here's one I made earlier
   (\D{BST}\;(\C{Val}\;\V{k})\;\V{u})
 \end{array}\]
 Note that $\V{k}$ is used left of its declaration and I don't care.
+
+Oh yeah, and you're allowed to overload constructors. As long as the value constructors for any given type constructor are distinct, you can reuse them (at the potential cost of requiring disambiguation by type signature).
+
+
+
+\section{structure is not class}
+
+A data type like
+\[\begin{array}{l}
+\data\quad\D{S02}\quad = \quad \C{C0}\quad | \quad \C{C2}\;\D{S02}\;\D{S02}
+\end{array}\]
+can represent an algebraic signature, but how shall we talk about structure?
+
+The usual Haskell way is with type classes, using $\mathkw{newtype}$
+to tell structures apart by forcing the types apart, meanwhile
+requiring heavy use of overloading to obtain structural benefits. I
+claim there are too many semigroups about for all of their operations
+to be called $<>$.  And God help you if you want to
+assemble a structure like a rig, from two different monoids on the
+same carrier.
+
+What I want is to recognize and organise the way existing objects
+already out there in the wild come together in a structure.
+Dream a dream!
+\[\begin{array}{l}
+\mathkw{structure}\quad \D{Monoid}\quad\where\\
+\quad\mathkw{model}\quad \D{S02}\\
+\quad\prove\quad \C{C2}\;\C{C0}\;\V{y} = \V{y}\\
+\quad\prove\quad \C{C2}\;\V{x}\;\C{C0} = \V{x}\\
+\quad\prove\quad \C{C2}\;(\C{C2}\;\V{x}\;\V{y})\;\V{z} =
+   \C{C2}\;\V{x}\;(\C{C2}\;\V{y}\;\V{z})\\
+\end{array}\]
+We might then say
+\[\begin{array}{l}
+\mathkw{structure}\quad \F{addition}\hab\D{Monoid}\quad\where\\
+\quad\mathkw{model}\quad \D{S02}\quad\mathkw{as}\quad \D{Number}\quad\where\\
+\quad \quad \mathkw{model}\quad\C{C0}\quad\mathkw{as}\quad\C{Z}\\
+\quad \quad \mathkw{model}\quad\C{C2}\quad\mathkw{as}\quad(\F{+})\\
+\quad\prove\quad \C{Z}+\V{y} = \V{y}\quad\qm\\
+\quad\prove\quad \V{x}+\C{Z} = \V{x}\quad\qm\\
+\quad\prove\quad (\V{x}+\V{y})+\V{z} = \V{x}+(\V{y}+\V{z})\quad\qm\\
+\end{array}\]
 
 \end{document}
