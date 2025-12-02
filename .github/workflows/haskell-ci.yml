@@ -8,18 +8,19 @@
 #
 # For more information, see https://github.com/haskell-CI/haskell-ci
 #
-# version: 0.19.20241202
+# version: 0.19.20250917
 #
-# REGENDATA ("0.19.20241202",["github","--no-cabal-check","--no-benchmarks","--no-haddock","ask.cabal"])
+# REGENDATA ("0.19.20250917",["github","--no-cabal-check","--no-benchmarks","--no-haddock","ask.cabal"])
 #
 name: Haskell-CI
 on:
   - push
   - pull_request
+  - merge_group
 jobs:
   linux:
     name: Haskell-CI - Linux - ${{ matrix.compiler }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes:
       60
     container:
@@ -28,14 +29,24 @@ jobs:
     strategy:
       matrix:
         include:
+          - compiler: ghc-9.12.2
+            compilerKind: ghc
+            compilerVersion: 9.12.2
+            setup-method: ghcup
+            allow-failure: false
+          - compiler: ghc-9.10.2
+            compilerKind: ghc
+            compilerVersion: 9.10.2
+            setup-method: ghcup
+            allow-failure: false
           - compiler: ghc-9.8.2
             compilerKind: ghc
             compilerVersion: 9.8.2
             setup-method: ghcup
             allow-failure: false
-          - compiler: ghc-9.6.6
+          - compiler: ghc-9.6.4
             compilerKind: ghc
-            compilerVersion: 9.6.6
+            compilerVersion: 9.6.4
             setup-method: ghcup
             allow-failure: false
           - compiler: ghc-9.4.8
@@ -57,12 +68,12 @@ jobs:
       - name: Install GHCup
         run: |
           mkdir -p "$HOME/.ghcup/bin"
-          curl -sL https://downloads.haskell.org/ghcup/0.1.30.0/x86_64-linux-ghcup-0.1.30.0 > "$HOME/.ghcup/bin/ghcup"
+          curl -sL https://downloads.haskell.org/ghcup/0.1.50.1/x86_64-linux-ghcup-0.1.50.1 > "$HOME/.ghcup/bin/ghcup"
           chmod a+x "$HOME/.ghcup/bin/ghcup"
       - name: Install cabal-install
         run: |
-          "$HOME/.ghcup/bin/ghcup" install cabal 3.12.1.0 || (cat "$HOME"/.ghcup/logs/*.* && false)
-          echo "CABAL=$HOME/.ghcup/bin/cabal-3.12.1.0 -vnormal+nowrap" >> "$GITHUB_ENV"
+          "$HOME/.ghcup/bin/ghcup" install cabal 3.16.0.0 || (cat "$HOME"/.ghcup/logs/*.* && false)
+          echo "CABAL=$HOME/.ghcup/bin/cabal-3.16.0.0 -vnormal+nowrap" >> "$GITHUB_ENV"
       - name: Install GHC (GHCup)
         if: matrix.setup-method == 'ghcup'
         run: |
@@ -138,7 +149,7 @@ jobs:
           chmod a+x $HOME/.cabal/bin/cabal-plan
           cabal-plan --version
       - name: checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           path: source
       - name: initial cabal.project for sdist
@@ -163,7 +174,11 @@ jobs:
           touch cabal.project.local
           echo "packages: ${PKGDIR_ask}" >> cabal.project
           echo "package ask" >> cabal.project
-          echo "    ghc-options: -Werror=missing-methods" >> cabal.project
+          echo "    ghc-options: -Werror=missing-methods -Werror=missing-fields" >> cabal.project
+          if [ $((HCNUMVER >= 90400)) -ne 0 ] ; then echo "package ask" >> cabal.project ; fi
+          if [ $((HCNUMVER >= 90400)) -ne 0 ] ; then echo "    ghc-options: -Werror=unused-packages" >> cabal.project ; fi
+          echo "package ask" >> cabal.project
+          echo "    ghc-options: -Werror=incomplete-patterns -Werror=incomplete-uni-patterns" >> cabal.project
           cat >> cabal.project <<EOF
           EOF
           $HCPKG list --simple-output --names-only | perl -ne 'for (split /\s+/) { print "constraints: any.$_ installed\n" unless /^(ask)$/; }' >> cabal.project.local
