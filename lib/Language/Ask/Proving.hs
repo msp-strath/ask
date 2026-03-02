@@ -149,6 +149,23 @@ gingerlies m ((x, s) :*: tel) (p : ps) (t : ts) = gingerly m s p t >>= \case
   _ -> return []
 gingerlies _ _ _ _ = return []
 
+
+isItThisProp :: Tm -> Tm -> AM Bool
+isItThisProp goal hyp = cope (hy False)
+    (\ _ -> cope (hy True)
+      (\ _ -> return False)
+      return)
+    return
+  where  -- this is ghastly
+    hy heh = do
+      doorStop
+      smegUp hyp
+      cope (unify' heh (TC "Prop" []) hyp goal)
+        gripe
+        return
+      doorStep
+      return True
+
 given :: Tm -> AM Bool{-proven?-}
 given goal = do
   ga <- gamma
@@ -159,19 +176,9 @@ given goal = do
   go ga
  where
   go B0 = gripe $ NotGiven goal
-  go (ga :< Hyp b hyp) = cope (hy False)
-    (\ _ -> cope (hy True) (\gr -> go ga) return) return
-    where  -- this is ghastly
-    hy heh = do
-      True <- trice ("TRYING " ++ show hyp) $ return True
-      doorStop
-      smegUp hyp
-      cope (unify' heh (TC "Prop" []) hyp goal)
-        (\ gr -> trice "OOPS" $ gripe gr)
-        return
-      doorStep
-      True <- trice "BINGO" $ return True
-      return b
+  go (ga :< Hyp b hyp) = do
+    test <- isItThisProp goal hyp
+    if test then return b else go ga
   go (ga :< _) = go ga
 
 

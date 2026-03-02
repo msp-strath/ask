@@ -431,14 +431,20 @@ fromSubs g f = hnf f >>= \case
     lhs' <- hnf lhs
     rhs' <- hnf rhs
     case (ty, lhs', rhs') of
-      (TC d ss, TC c rs, TC e ts)
-        | c /= e -> flip (cope (isDataType d)) return $ \ _ ->
-           fred . GIVEN q $ PROVE g
-        | otherwise -> ginger B0 [(ty, (lhs, rhs))] g
       (_, TE (TP (xn, _)), _) ->
            fred $ PROVE (e4p (xn, rhs ::: ty) g)
       (_, _, TE (TP (xn, _))) ->
            fred $ PROVE (e4p (xn, lhs ::: ty) g)
+      (Prop, _ , _) -> do
+        isl <- isItThisProp g lhs'
+        isr <- isItThisProp g rhs'
+        if isl then fred $ PROVE rhs
+          else if isr then fred $ PROVE lhs
+            else fred . GIVEN q $ PROVE g
+      (TC d ss, TC c rs, TC e ts)
+        | c /= e -> flip (cope (isDataType d)) return $ \ _ ->
+           fred . GIVEN q $ PROVE g
+        | otherwise -> ginger B0 [(ty, (lhs, rhs))] g
       _ -> fred . GIVEN q $ PROVE g
   f -> invert f >>= \case
     [([], [s])] -> flop s g
