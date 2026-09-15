@@ -1,0 +1,19 @@
+data Number = Z | S Number
+
+(+) :: Number -> Number -> Number
+defined x + y inductively x where
+  defined x + y from x where
+    defined Z + y = y
+    defined S x + y = S (x + y)
+
+proven (a + b) + c = a + (b + c) inductively a where
+  proven a + b + c = a + (b + c) from a where
+    given a = S x
+      proven (S x + b) + c
+          = S ((x + b) + c)
+          = S (x + (b + c))
+          = S x + (b + c)
+
+prove a + b = c + d = e + f where
+  prove a + b = c + d ?
+  prove c + d = e + f ?

@@ -22,6 +22,8 @@ import qualified Data.Map as M
 import Control.Applicative
 import Control.Monad
 
+import Debug.Trace
+
 
 ------------------------------------------------------------------------------
 --  Raw Syntax Datatypes
@@ -82,13 +84,14 @@ data Method t
   | Ind [String]
   | Tested Bool -- ed?
   | Under t
+  | Route
   deriving (Show, Functor)
 
 data Given t
   = Given t
   deriving (Show, Functor)
 
-data Assocy = LAsso | NAsso | RAsso deriving (Show, Eq)
+data Assocy = LAsso | NAsso | RAsso | {-Pablo Pi-}QAsso deriving (Show, Eq)
 type FixityTable = M.Map String (Int, Assocy)
 
 data GramBit = Terminal String | NonTerminal Con deriving (Show, Eq)
@@ -278,7 +281,7 @@ instance MDep Appl where
 
 -- FIXME: support tuples but not by treating comma as infix
 pAppl :: [String] -- , and ` are already not allowed to be infix
-                  -- but sometimeswe have other *top-level* exceptions
+                  -- but sometimes we have other *top-level* exceptions
                   -- e.g., in data decls
       -> PF Appl
 pAppl nae = ext $ pAppl' nae
@@ -308,16 +311,19 @@ pAppl' nae = penv >>= gimme where
        -> (Int, Assocy) -- we've got this
        -> Appl
        -> PF Appl'
-  more nae (i, a) (j, b) (ls, e) = (<|> pure e) $ do
+  more nae (i, a) (j, b) (ls, e@(me :$$ mine)) = (<|> pure e) $ do
     (rs, (kc, e)) <- ext $ do
       spc
       o <- iop nae
       let (k, c) = fixity o
+      let qaqa = b == QAsso && c == QAsso && j == k && txt me == txt o
       guard (k > i || k == i && a == RAsso && c == RAsso)
-      guard (k < j || k == j && b == LAsso && c == LAsso)
+      guard (k < j || k == j && b == LAsso && c == LAsso || qaqa)
       spc
       f <- ext $ start nae (k, c)
-      return ((k, c), o :$$ [(ls, e), f])
+      if qaqa
+        then return ((k, c), me :$$ (mine ++ [f]))
+        else return ((k, c), o :$$ [(ls, e), f])
     more nae (i, a) kc (ls ++ rs, e)
   tup :: ([LexL], [Appl]) -> Appl'
   tup (_, [(_, x)]) = x

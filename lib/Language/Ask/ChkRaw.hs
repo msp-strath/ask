@@ -177,7 +177,15 @@ chkProof g m ps src = do
   go = case my g of
     Just gt -> do
       (m, b0) <- case m of
-        Stub b -> pure $ (Stub b, False)
+        Stub True -> pure $ (Stub True, False)
+        Stub False -> case gt of
+          TC "=" (ty : ts) | length ts > 2 ->
+            let noah (a : b : cs) = do
+                  fred (PROVE (TC "=" [ty, a, b]))
+                  noah (b : cs)
+                noah _ = pure ()
+            in  (Route, True) <$ noah ts
+          _ -> pure $ (Stub False, False)
         By r -> (,True) <$> By <$> (gt `by` r)
         From h@(_, (t, _, _) :$$ _)
           | elem t [Uid, Sym] -> do
@@ -483,6 +491,9 @@ ginger qz ((ty, (l, r)) : qs) g =
         | c /= e -> flip (cope (isDataType d)) return $ \ _ -> dull
         | otherwise -> do
           tel <- constructor PAT ty c
+          (rs, ts) <- return $ case (c, rs, ts) of
+            ("=", at : a : _, bt : b : _) -> ([at, a, last rs], [bt, b, last ts])
+            _ -> (rs, ts)
           plan <- prepareSubQs tel rs ts
           ginger qz (glom [] plan ++ qs) g
       _ -> dull
