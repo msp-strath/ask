@@ -13,13 +13,10 @@
 
 module Language.Ask.Typing where
 
---import Data.List
-import Control.Applicative
 import Data.Foldable
 import Control.Monad
 import Control.Arrow ((***))
 import Data.Traversable
-import Data.List hiding ((\\))
 
 import Debug.Trace
 

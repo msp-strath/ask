@@ -5,30 +5,38 @@ module Language.Ask.Lexing where
 import Data.Char
 import Data.List
 import Data.Bifunctor
+import Data.IntMap (IntMap)
+import qualified Data.IntMap as IntMap
+import Control.Monad.State
 
 import Language.Ask.Bwd
 import Language.Ask.OddEven
 
-lexAll :: String -> Bloc Line
-lexAll = lexPhase1 . lexPhase0
+mapFst :: (a -> c) -> (a, b) -> (c, b)
+mapFst f (a, b) = (f a, b)
+
+lexAll :: String -> (Bloc Line, LidLookupTable)
+lexAll = mapFst lexPhase1 . lexPhase0
+
 
 data Tok f
-  = Lid
-  | Key
-  | Uid
-  | Und
-  | Sym
-  | Spc
-  | Num
-  | Str
-  | Chr
-  | Ret
-  | Cmm
+  = Lid -- lowercase identifier
+  | Key -- keyword
+  | Uid -- uppercase identifier
+  | Und -- underscore
+  | Sym -- symbol, see specials and symbols
+  | Spc -- space
+  | Num -- number literal
+  | Str -- string literal
+  | Chr -- character literal
+  | Ret -- newline
+  | Cmm -- comment
   | Bad
-  | T (f (Lex f))
+  | T (f (Lex f)) -- possible structure
 
 type Pos = (Int, Int) -- row and column; origin is 1
 type Lex f = (Tok f, Pos, String)
+
 txt :: Lex f -> String
 txt (_, _, s) = s
 
@@ -76,8 +84,26 @@ data K0 x deriving (Show, Eq)
 instance PShow K0 where pshow = show
 instance PEq K0 where peq = (==)
 
+-- initial lexing phase, no additional structure
 type Tok0 = Tok K0
 type Lex0 = Lex K0
+
+-- During phase0, we replace every Lid with a unqiue integer and populate a table with their actual identifier
+type LidLookupTable = IntMap String
+
+-- If every entry from empty is added using addLidEntry, then every entry is unique
+addLidEntry :: String -> LidLookupTable -> (Int, LidLookupTable)
+addLidEntry w m = (i, IntMap.insert i w m) where
+  i = IntMap.size m
+
+updateLidTable :: Tok0 -> Bool {- isKey -} -> String -> State LidLookupTable String
+updateLidTable Lid False w = do
+  i <- state (addLidEntry w)
+  return (show i) -- TODO: embedding the unique key back into a string seems like the wrong approach
+updateLidTable _ _ w = return w
+
+(<:>) :: Functor f => a -> f [a] -> f [a]
+x <:> fxs = (x :) <$> fxs
 
 tok0 :: Tok0 -> Tok f
 tok0 Lid = Lid
@@ -96,8 +122,8 @@ tok0 Bad = Bad
 lex0 :: Lex0 -> (Tok f, Pos, String)
 lex0 (t, p, s) = (tok0 t, p, s)
 
-lexPhase0 :: String -> [Lex0]
-lexPhase0 = phase0 (1, 1) . untab 1
+lexPhase0 :: String -> ([Lex0], LidLookupTable)
+lexPhase0 = (flip runState) IntMap.empty . (phase0 (1, 1)) . untab 1
 
 untab :: Int -> String -> String
 untab i [] = []
@@ -106,8 +132,11 @@ untab i ('\t' : s) = ' ' : skip (i + 1) s where
            | otherwise = ' ' : skip (i + 1) s
 untab i (c : s) = c : untab (if c `elem` newlines then 1 else i + 1) s
 
-phase0 :: Pos -> String -> [Lex0]
-phase0 _ [] = []
+-- Unstructured tokenization
+-- LidLookupTable is built up during this phase
+-- Lids are replaced with unique keys into the LidLookupTable, which contains the actual token
+phase0 :: Pos -> String -> State LidLookupTable [Lex0]
+phase0 _ [] = return []
 phase0 p@(y, x) ('"' : s) = literal0 Str '"' p (B0 :< '"') (y, x + 1) s
 phase0 p@(y, x) ('\'' : s) = literal0 Chr '\'' p (B0 :< '"') (y, x + 1) s
 phase0 p@(y, x) ('{' : '-' : s) = brcomm0 p (B0 :< '{' :< '-') 0 (y, x + 2) s
@@ -119,52 +148,54 @@ phase0 p@(y, x) ('-' : '-' : s) | commenty s =
     commenty _ = True
 phase0 p@(y, x) ('_' : c : cs) | isIdTaily c
   = more0 Lid p (B0 :< '_' :< c)(y, x + 2) isIdTaily cs
-phase0 p@(y, x) ('_' : cs) = (Und, p, "_") : phase0 (y, x + 1) cs
+phase0 p@(y, x) ('_' : cs) = (Und, p, "_") <:> phase0 (y, x + 1) cs
 phase0 p@(y, x) (c : cs) = case c of
   ' ' -> space0 p p 0 (c : cs)
-  _ | c `elem` specials -> (Sym, p, [c]) : phase0 (y, x + 1) cs
+  _ | c `elem` specials -> (Sym, p, [c]) <:> phase0 (y, x + 1) cs
     | c `elem` symbols -> more0 Sym p (B0 :< c) (y, x + 1) (`elem` symbols) cs
-    | c `elem` newlines -> (Ret, p, [c]) : phase0 (y + 1, 1) cs
+    | c `elem` newlines -> (Ret, p, [c]) <:> phase0 (y + 1, 1) cs
     | isDigit c -> more0 Num p (B0 :< c) (y, x + 1) isDigit cs
     | isLower c -> more0 Lid p (B0 :< c) (y, x + 1) isIdTaily cs
     | isUpper c -> more0 Uid p (B0 :< c) (y, x + 1) isIdTaily cs
     | otherwise -> phase0 (y, x + 1) cs
 
-more0 :: Tok0 -> Pos -> Bwd Char -> Pos -> (Char -> Bool) -> String -> [Lex0]
+more0 :: Tok0 -> Pos -> Bwd Char -> Pos -> (Char -> Bool) -> String -> State LidLookupTable [Lex0]
 more0 t o cz (y, x) f (c : cs) | f c = more0 t o (cz :< c) (y, x + 1) f cs
-more0 t o cz p f s = (if b then Key else t, o, w) : phase0 p s where
-  w = cz <>> ""
-  b = t == Lid && (w `elem` keywords)
+more0 t o cz p f s = do
+  let w = cz <>> ""
+  let isKey = t == Lid && (w `elem` keywords)
+  w <- updateLidTable t isKey w
+  (if isKey then Key else t, o, w) <:> phase0 p s
 
-literal0 :: Tok0 -> Char -> Pos -> Bwd Char -> Pos -> String -> [Lex0]
-literal0 t e o cz (y, x) (c : s) | c == e = (t, o, cz <>> [c]) : phase0 (y, x + 1) s
+literal0 :: Tok0 -> Char -> Pos -> Bwd Char -> Pos -> String -> State LidLookupTable [Lex0]
+literal0 t e o cz (y, x) (c : s) | c == e = (t, o, cz <>> [c]) <:> phase0 (y, x + 1) s
 literal0 t e o cz (y, x) ('\\' : c : s)
   | c > ' ' = literal0 t e o (cz :< '\\' :< c) (y, x + 2) s
   | otherwise = multilit0 t e o (cz :< '\\') (y, x + 1) (c : s)
 literal0 t e o cz (y, x) (c : s) = literal0 t e o (cz :< c) (y, x + 1) s
-literal0 t e o cz _ [] = [(Bad, o, cz <>> "")]
+literal0 t e o cz _ [] = return [(Bad, o, cz <>> "")]
 
-multilit0 :: Tok0 -> Char -> Pos -> Bwd Char -> Pos -> String -> [Lex0]
+multilit0 :: Tok0 -> Char -> Pos -> Bwd Char -> Pos -> String -> State LidLookupTable [Lex0]
 multilit0 t e o cz (y, x) ('\\' : cs) = literal0 t e o (cz :< '\\') (y, x + 1) cs
 multilit0 t e o cz (y, x) (' ' : cs) = multilit0 t e o (cz :< ' ') (y, x + 1) cs
 multilit0 t e o cz (y, x) (c : cs) | c `elem` newlines = multilit0 t e o (cz :< c) (y + 1, 1) cs
-multilit0 t e o cz p s = (Bad, o, cz <>> s) : phase0 p s
+multilit0 t e o cz p s = (Bad, o, cz <>> s) <:> phase0 p s
 
-brcomm0 :: Pos -> Bwd Char -> Int -> Pos -> String -> [Lex0]
+brcomm0 :: Pos -> Bwd Char -> Int -> Pos -> String -> State LidLookupTable [Lex0]
 brcomm0 o cz n (y, x) ('-' : '}' : s) = case n of
-  0 -> (Cmm, o, cz <>> "-}") : phase0 (y, x + 2) s
+  0 -> (Cmm, o, cz <>> "-}") <:> phase0 (y, x + 2) s
   n -> brcomm0 o (cz :< '-' :< '}') (n - 1) (y, x + 2) s
 brcomm0 o cz n (y, x) ('{' : '-' : s) =
   brcomm0 o (cz :< '{' :< '-') (n + 1) (y, x + 2) s
 brcomm0 o cz n (y, x) (c : s) =
   brcomm0 o (cz :< c) n (if c `elem` newlines then (y + 1, 1) else (y, x + 1)) s
-brcomm0 o cz n _ [] = [(Bad, o, cz <>> "")]
+brcomm0 o cz n _ [] = return [(Bad, o, cz <>> "")]
 
-space0 :: Pos -> Pos -> Int -> String -> [Lex0]
-space0 o _ i [] = []
+space0 :: Pos -> Pos -> Int -> String -> State LidLookupTable [Lex0]
+space0 o _ i [] = return []
 space0 o p@(y, x) i s@(c : cs) = case c of
   ' ' -> space0 o (y, x + 1) (i + 1) cs
-  _ -> (Spc, o, replicate i ' ') : phase0 p s
+  _ -> (Spc, o, replicate i ' ') <:> phase0 p s
 
 newlines :: String
 newlines = "\r\n"
@@ -190,15 +221,19 @@ isIdTaily c = isAlphaNum c || c `elem` "'_"
 data LayKind = Empty | Denty Int | Bracy deriving (Show, Eq)
 
 data Lay l
+  -- Layout
+  -- (<originalString>, LayKind) :-! lines
+        -- gappy/bracy -^   ^- begins and ends non-gappy
   = (String, LayKind) :-! Odd [l] [l]
-                    -- gappy/bracy -^   ^- begins and ends non-gappy
+  -- bracket structure
+  -- LB <openBracketToken> [<innards>] <closeBracketToken>
   | LB l [l] l
   deriving (Show, Eq)
 
 infixr 5 :-!
 
--- an EmptyL layout should have [] :-/ Stop as its body
--- a Dental i layout should be indented at column i (> 0), so
+-- an Empty layout should have [] :-/ Stop as its body
+-- a Denty i layout should be indented at column i (> 0), so
 --   all but the last odd entry should either be gappy or contain a semicolon
 --   its last odd entry should be empty
 --   its even entries should start at column i unless preceded by a ; in
@@ -359,7 +394,7 @@ bout (ls :-/ e) = rfold lout ls . case e of
   ls :-\ o -> rfold lout ls . bout o
 
 askTokIn :: String -> String -> Bool
-askTokIn a b = go (lexPhase0 a) (lexPhase0 b) where
+askTokIn a b = go (fst (lexPhase0 a)) (fst (lexPhase0 b)) where
   go as bs | pref as bs = True
   go as [] = False
   go as (_ : bs) = go as bs

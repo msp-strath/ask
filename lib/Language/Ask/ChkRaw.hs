@@ -10,6 +10,7 @@ import Control.Applicative
 import Data.Traversable
 import Control.Monad
 import Data.Foldable
+import qualified Data.IntMap as IntMap
 
 import Debug.Trace
 
@@ -793,7 +794,7 @@ chkParse (Make Pse (ParseProb c sm) m () ss (ls, rs)) = do
         (psm, x) <- pure $ case x of
           Make Pse (ParseProb c' qm) m a _ _
             | c == c' -> case ((lexAll . read) <$> qm, m, a) of
-              (Just (_ :-/ ys :-\ _), By _, (Keep, True)) ->
+              (Just (_ :-/ ys :-\ _, lt), By _, (Keep, True)) ->
                 (Just (fmap txt (ys >>= unLay >>= visi)), x)
               _ -> (Nothing, x)
           Make z g m _ ss subs ->
@@ -819,7 +820,7 @@ chkParse (Make Pse (ParseProb c sm) m () ss (ls, rs)) = do
       True -> case sm of
         Nothing -> gripe $ ParseNoString
         Just s -> case lexAll (read s) of
-          _ :-/ ys :-\ _ -> do
+          (_ :-/ ys :-\ _, _) -> do
             (qsm, ss) <- subs p ss
             pure $ case qsm of
               Just qs -> if fmap txt (ys >>= unLay >>= visi) == qs
@@ -928,9 +929,10 @@ filth s = case runAM go () initAskState of
   go :: AM String
   go = do
     fi <- getFixities
-    let (fo, b) = raw fi s
+    let (fo, lt, b) = raw fi s
     setFixities fo
-    bifoldMap (($ "") . rfold lout) id <$> traverse askRawDecl b
+    setLidTable lt
+    bifoldMap (($ "") . rfold lout) id <$> traverse (askRawDecl) b
 
 ordure :: String -> String
 ordure s = case runAM go () initAskState of
@@ -940,15 +942,17 @@ ordure s = case runAM go () initAskState of
   go :: AM String
   go = do
     fi <- getFixities
-    let (fo, b) = raw fi s
+    let (fo, lt, b) = raw fi s
     setFixities fo
-    bifoldMap (($ "") . rfold lout) id <$> traverse askRawDecl b
+    setLidTable lt
+    bifoldMap (($ "") . rfold lout) id <$> traverse (askRawDecl) b
 
 initAskState :: AskState
 initAskState = AskState
   { context  = myContext
   , root     = (B0, 0)
   , fixities = myFixities
+  , lidTable = IntMap.empty
   }
 
 filthier :: AskState -> String -> (String, AskState)
@@ -959,6 +963,7 @@ filthier as s = case runAM go () as of
   go :: AM String
   go = do
     fi <- getFixities
-    let (fo, b) = raw fi s
+    let (fo, lt, b) = raw fi s
     setFixities fo
-    bifoldMap (($ "") . rfold lout) id <$> traverse askRawDecl b
+    setLidTable lt
+    bifoldMap (($ "") . rfold lout) id <$> traverse (askRawDecl) b

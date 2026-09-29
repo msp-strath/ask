@@ -18,6 +18,8 @@ import qualified Control.Monad.Fail as Fail
 import qualified Data.Map as M
 import Control.Applicative
 import Control.Arrow ((***))
+import Text.Read
+import qualified Data.IntMap as IntMap
 
 import Language.Ask.Bwd
 import Language.Ask.Hide
@@ -120,6 +122,7 @@ data AskState = AskState
   { context  :: Context
   , root     :: Root
   , fixities :: FixityTable
+  , lidTable :: LidLookupTable
   } deriving Show
 
 type Setup = () -- atavism
@@ -197,6 +200,15 @@ fresh :: String -> AM Nom
 fresh x = AM $ \ setup as -> case root as of
   (roo, non) -> Right (roo <>> [(x, non)], as {root = (roo, non + 1)})
 
+setLidTable :: LidLookupTable -> AM ()
+setLidTable lt = AM $ \ _ s -> Right ((), s {lidTable = lt})
+
+lookupLid :: String -> AM String
+lookupLid x =
+  AM $ \ _ as ->
+    case readMaybe x >>= (IntMap.!?) (lidTable as) of
+      Just y -> Right (y, as)
+      Nothing -> Right(x, as)
 
 ------------------------------------------------------------------------------
 --  Context-Wrangling and Fresh Thingy Generation
@@ -231,36 +243,37 @@ pop test = do
 
 -- find one of the user's variables by what they call it
 what's :: String -> AM (Either (Nom, Sch) (Syn, Tm))
-what's x = do
+what's ident = do
+  x <- lookupLid ident
   ga <- gamma
-  cope (go ga)
+  cope (go ga x)
     (\case
       Scope _ -> do
-        (e, ga) <- qu ga
+        (e, ga) <- qu ga x
         setGamma ga
         return e
       gr -> gripe gr)
     $ return
  where
-  go :: Context -> AM (Either (Nom, Sch) (Syn, Tm))
-  go B0 = gripe (Scope x)
-  go (_ :< Bind p@(_, Hide ty) (User y)) | x == y =
+  go :: Context -> String -> AM (Either (Nom, Sch) (Syn, Tm))
+  go B0 x = gripe (Scope x)
+  go (_ :< Bind p@(_, Hide ty) (User y)) x | x == y =
     return $ Right (TP p, ty)
-  go (ga :< RecShadow y) | x == y = gripe (BadRec x)
-  go (ga :< Declare y yn sch) | x == y = return $ Left (yn, sch)
-  go (ga :< z) = go ga
---  decl (ga :< Declare y yn sch) | x == y = Just (yn, sch)
+  go (ga :< RecShadow y) x | x == y = gripe (BadRec x)
+  go (ga :< Declare y yn sch) x | x == y = return $ Left (yn, sch)
+  go (ga :< z) x = go ga x
+--  decl (ga :< Declare y yn sch) | x' == y = Just (yn, sch)
 --  decl (ga :< _) = decl ga
 --  decl B0 = Nothing
-  qu ga@(_ :< RefuseQuantification) = gripe (Scope x)
-  qu ga@(_ :< ImplicitQuantifier) = do
+  qu ga@(_ :< RefuseQuantification) x = gripe (Scope x)
+  qu ga@(_ :< ImplicitQuantifier) x = do
     xTp <- (, Hide Type) <$> fresh "Ty"
     let xTy = TE (TP xTp)
     xp  <- (, Hide xTy)  <$> fresh x
     return (Right (TP xp, xTy), ga :< Bind xTp Hole :< Bind xp (User x))
-  qu B0 = gripe (Scope x)
-  qu (ga :< z) = do
-    (e, ga) <- qu ga
+  qu B0 x = gripe (Scope x)
+  qu (ga :< z) x = do
+    (e, ga) <- qu ga x
     return (e, ga :< z)
 
 -- finding one of ours

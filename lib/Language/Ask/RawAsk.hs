@@ -121,9 +121,9 @@ instance (Show a, Show t) => Show (SubMake a t) where
 --  Lex and Parse
 ------------------------------------------------------------------------------
 
-raw :: FixityTable -> String -> (FixityTable, Bloc (RawDecl, [LexL]))
-raw fi input = (fo, fmap grok ls) where
-  ls = lexAll input
+raw :: FixityTable -> String -> (FixityTable, LidLookupTable, Bloc (RawDecl, [LexL]))
+raw fi input = (fo, lidTable, fmap grok ls) where
+  (ls, lidTable) = lexAll input
   ft = newFixities ls
   fo = fi <> ft
   grok l = case parTok pDecl fo l of

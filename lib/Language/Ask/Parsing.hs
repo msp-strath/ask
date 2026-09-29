@@ -8,15 +8,14 @@ module Language.Ask.Parsing where
 
 import Control.Monad
 import Control.Applicative
-import Data.List
 
 import Language.Ask.OddEven
 import Language.Ask.Lexing
 
 newtype ParTok e x = ParTok {parTok
   :: e       -- some sort of read-only environment, never mind what
-  -> [LexL]
-  -> [([LexL], x, [LexL])]
+  -> [LexL]  -- input
+  -> [([LexL], x, [LexL])] -- [(<parsedTokens>, <output>, <tokensLeftToParse>)]
   } deriving (Semigroup, Monoid)
 
 instance Monad (ParTok e) where
