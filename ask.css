@@ -29,3 +29,9 @@
 .ask-parens {
   font-weight: bold;
 }
+.ask-typeconstructor {
+  color: blue;
+}
+.ask-dataconstructor {
+  color: red;
+}
