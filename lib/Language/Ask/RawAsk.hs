@@ -303,6 +303,8 @@ pAppl' nae = penv >>= gimme where
       kinda Num <|> kinda Str <|> kinda Chr <|>
       brk '(' (spd (iop [])))
     <|> tup <$> ext (brk '(' (sep (ext (go [])) (spd (the Sym ","))))
+    <|> brk '[' (spd (go []))
+            
   iop :: [String] -> PF LexL
   iop nae = (kinda Sym >>= \ l@(_, _, s) -> guard (not $ elem s (nae ++ ["`", ","])) >> return l)
     <|> id <$ the Sym "`" <*> (kinda Uid <|> kinda Lid) <* the Sym "`"

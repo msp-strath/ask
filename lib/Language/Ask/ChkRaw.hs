@@ -13,6 +13,7 @@ import Data.Foldable
 
 import Debug.Trace
 
+import Language.Ask.HalfZip
 import Language.Ask.Hide
 import Language.Ask.Thin
 import Language.Ask.Bwd
@@ -156,6 +157,19 @@ chkProg p gr mr ps src@(h,b) = do
         (rfold e4p sb la)
         (rfold e4p sb ty)
 
+bracked :: (Tm, Tm) -> Maybe [Subgoal]
+bracked (TQ y l, TQ _ r) = pure [PROVE (TC "=" [y, l, r])]
+  -- try to ensure that the type on the right is also y
+bracked (TC c ss, TC d ts)
+  | c == d, Just sts <- halfZip ss ts
+  = concat <$> traverse bracked sts
+bracked (TE e, TE f) = help (e, f) where
+  help (s ::: _, t ::: _) = bracked (s, t)
+  help (e :$ s, f :$ t) = (++) <$> help (e, f) <*> bracked (s, t)
+  help (e, f) = [] <$ guard (e == f)
+bracked (s, t) = [] <$ guard (s == t)
+
+
 -- this type is highly provisional
 chkProof
   :: TmR         -- the goal
@@ -179,9 +193,11 @@ chkProof g m ps src = do
       (m, b0) <- case m of
         Stub True -> pure $ (Stub True, False)
         Stub False -> case gt of
-          TC "=" (ty : ts) | length ts > 2 ->
+          TC "=" (ty : ts) -> -- | length ts > 2 ->
             let noah (a : b : cs) = do
-                  fred (PROVE (TC "=" [ty, a, b]))
+                  case bracked (a, b) of
+                    Just qs -> () <$ traverse fred qs
+                    _ -> () <$ fred (PROVE (TC "=" [ty, a, b]))
                   noah (b : cs)
                 noah _ = pure ()
             in  (Route, True) <$ noah ts

@@ -44,6 +44,7 @@ hnf :: Tm -> AM Tm
 hnf t = case t of
   TC _ _ -> return t
   TB _ -> return t
+  TQ y t -> hnf t
   TE e -> upsilon <$> hnfSyn e
 
 upsilon :: Syn -> Tm
@@ -318,13 +319,14 @@ elabEq lhs rhs = do
         return $ TC "=" [ty, lhs, rhs]
 
 elabTm :: ConMode -> Tm -> Appl -> AM Tm
+-- elabTm m ty ([(T (LB (_, _, "[") _ _), _ , _)], a) | trace (show ty ++ " on " ++ show a) False = undefined
 elabTm m ty (_, a) | track (show ty ++ " on " ++ show a) False = undefined
 elabTm m ty (ls, (Sym, _, "=") :$$ [lhs, rhs]) = do
   unify Type ty Prop
   elabEq lhs rhs
 elabTm m ty (ls, l@(_, _, y) :$$ ras) = do
   ga <- gamma
-  case l of
+  t <- case l of
     _ | synthy ga l -> do
       (e, sy) <- elabSyn m y ras
       cope (subtype sy ty) (\ _ -> do
@@ -342,7 +344,10 @@ elabTm m ty (ls, l@(_, _, y) :$$ ras) = do
       tel <- constructor m ty y
       fst <$> elabVec m y tel ras
     _ -> gripe FAIL
- where
+  case ls of
+    [(T (LB (_, _, "[") _ _), _ , _)]
+      -> return $ TQ ty t
+    _ -> return t
 
 
 shitSort :: [((String, Tm), Appl)] -> AM [((String, Tm), Appl)]
@@ -639,6 +644,7 @@ instance PDep Tm where
   pDep x t = case t of
       TC _ ts -> pDep x ts
       TB t -> pDep x t
+      TQ y t -> pDep x y || pDep x t
       TE e -> pDep x e
 
 instance PDep Syn where
