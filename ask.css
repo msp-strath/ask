@@ -1,0 +1,31 @@
+.ask-editor {
+  background: #eee;
+}
+.ask-primary-keyword {
+  background-color: orange;
+}
+.ask-assumption {
+  background-color: orchid;
+}
+.ask-secondary-keyword {
+  font-weight: bold;
+}
+.ask-response-success {
+  background-color: palegreen;
+}
+.ask-commented {
+  color: light-dark(firebrick, gray);
+}
+.ask-nonterminal {
+  color: blue;
+}
+.ask-stringliteral {
+  color: brown;
+  font-style: italic;
+}
+.ask-focus {
+  background-color: lemonchiffon;
+}
+.ask-parens {
+  font-weight: bold;
+}
