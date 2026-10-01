@@ -23,3 +23,9 @@
   color: brown;
   font-style: italic;
 }
+.ask-focus {
+  background-color: lemonchiffon;
+}
+.ask-parens {
+  font-weight: bold;
+}
