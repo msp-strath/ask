@@ -993,3 +993,9 @@ filthier as s = case runAM go () as of
     let (fo, b) = raw fi s
     setFixities fo
     bifoldMap (($ "") . rfold lout) id <$> traverse askRawDecl b
+
+blueyes :: AskState -> [String]
+blueyes = foldMap bluey . context where
+  bluey (Data con _) = [con]
+  bluey _ = []
+
