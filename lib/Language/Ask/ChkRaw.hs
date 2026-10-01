@@ -158,8 +158,12 @@ chkProg p gr mr ps src@(h,b) = do
         (rfold e4p sb ty)
 
 bracked :: (Tm, Tm) -> Maybe [Subgoal]
-bracked (TQ y l, TQ _ r) = pure [PROVE (TC "=" [y, l, r])]
+bracked (TQ y l, TQ _ r) = case bracked (l, r) of
+  Just qs -> Just qs
+  _ -> pure [PROVE (TC "=" [y, l, r])]
   -- try to ensure that the type on the right is also y
+bracked (TQ y l, t) = bracked (l, t)
+bracked (s, TQ y r) = bracked (s, r)
 bracked (TC c ss, TC d ts)
   | c == d, Just sts <- halfZip ss ts
   = concat <$> traverse bracked sts
