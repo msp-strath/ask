@@ -13,6 +13,7 @@ import Data.Foldable
 
 import Debug.Trace
 
+import Language.Ask.HalfZip
 import Language.Ask.Hide
 import Language.Ask.Thin
 import Language.Ask.Bwd
@@ -156,6 +157,23 @@ chkProg p gr mr ps src@(h,b) = do
         (rfold e4p sb la)
         (rfold e4p sb ty)
 
+bracked :: (Tm, Tm) -> Maybe [Subgoal]
+bracked (TQ y l, TQ _ r) = case bracked (l, r) of
+  Just qs -> Just qs
+  _ -> pure [PROVE (TC "=" [y, l, r])]
+  -- try to ensure that the type on the right is also y
+bracked (TQ y l, t) = bracked (l, t)
+bracked (s, TQ y r) = bracked (s, r)
+bracked (TC c ss, TC d ts)
+  | c == d, Just sts <- halfZip ss ts
+  = concat <$> traverse bracked sts
+bracked (TE e, TE f) = help (e, f) where
+  help (s ::: _, t ::: _) = bracked (s, t)
+  help (e :$ s, f :$ t) = (++) <$> help (e, f) <*> bracked (s, t)
+  help (e, f) = [] <$ guard (e == f)
+bracked (s, t) = [] <$ guard (s == t)
+
+
 -- this type is highly provisional
 chkProof
   :: TmR         -- the goal
@@ -177,7 +195,17 @@ chkProof g m ps src = do
   go = case my g of
     Just gt -> do
       (m, b0) <- case m of
-        Stub b -> pure $ (Stub b, False)
+        Stub True -> pure $ (Stub True, False)
+        Stub False -> case gt of
+          TC "=" (ty : ts) -> -- | length ts > 2 ->
+            let noah (a : b : cs) = do
+                  case bracked (a, b) of
+                    Just qs -> () <$ traverse fred qs
+                    _ -> () <$ fred (PROVE (TC "=" [ty, a, b]))
+                  noah (b : cs)
+                noah _ = pure ()
+            in  (Route, True) <$ noah ts
+          _ -> pure $ (Stub False, False)
         By r -> (,True) <$> By <$> (gt `by` r)
         From h@(_, (t, _, _) :$$ _)
           | elem t [Uid, Sym] -> do
@@ -483,6 +511,9 @@ ginger qz ((ty, (l, r)) : qs) g =
         | c /= e -> flip (cope (isDataType d)) return $ \ _ -> dull
         | otherwise -> do
           tel <- constructor PAT ty c
+          (rs, ts) <- return $ case (c, rs, ts) of
+            ("=", at : a : _, bt : b : _) -> ([at, a, last rs], [bt, b, last ts])
+            _ -> (rs, ts)
           plan <- prepareSubQs tel rs ts
           ginger qz (glom [] plan ++ qs) g
       _ -> dull

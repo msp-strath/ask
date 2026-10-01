@@ -37,6 +37,7 @@ data Chk s
   = TM String [s]       -- metavariable instantiation
   | TC Con [Chk s]      -- canonical form
   | TB (Bind (Chk s))   -- binding form
+  | TQ (Chk s) (Chk s)  -- bracketed type-then-term
   | TE s                -- other stuff
   deriving (Eq, Show, Functor, Foldable, Traversable)
 
@@ -81,6 +82,7 @@ instance SubTm Tm where
   subTm s (TM _ ss) = subTm s ss
   subTm s (TC _ ts) = subTm s ts
   subTm s (TB b) = subTm s b
+  subTm s (TQ y t) = subTm s y || subTm s t
   subTm s (TE e) = subTm s e
 
 instance SubTm Syn where
@@ -151,10 +153,12 @@ instance Thin s => Thin (Chk s) where
   TM m ss <^> th = TM m (ss <^> th)
   TC c ts <^> th = TC c (ts <^> th)
   TB t    <^> th = TB (t <^> th)
+  TQ y t  <^> th = TQ (y <^> th) (t <^> th)
   TE s    <^> th = TE (s <^> th)
   thicken th (TM m ss) = TM m <$> thicken th ss
   thicken th (TC c ts) = TC c <$> thicken th ts
   thicken th (TB t)    = TB <$> thicken th t
+  thicken th (TQ y t)  = TQ <$> thicken th y <*> thicken th t
   thicken th (TE s)    = TE <$> thicken th s
 
 instance Thin Syn where
@@ -275,14 +279,17 @@ instance Stan Tm where
     es' = map (stan ms) es
   stan ms (TC c ts) = TC c (stan ms ts)
   stan ms (TB b)    = TB (stan ms b)
+  stan ms (TQ y t)  = TQ (stan ms y) (stan ms t)
   stan ms (TE e)    = upTE (stan ms e)
   sbst u es (TM m es') = TM m (sbst u es es')
   sbst u es (TC c ts) = TC c (sbst u es ts)
   sbst u es (TB t)    = TB (sbst u es t)
+  sbst u es (TQ y t)  = TQ (sbst u es y) (sbst u es t)
   sbst u es (TE e)    = upTE (sbst u es e)
   abst x i (TM m es) = TM m <$> abst x i es
   abst x i (TC c ts) = TC c <$> abst x i ts
   abst x i (TB b)    = TB <$> abst x i b
+  abst x i (TQ y t)  = TQ <$> abst x i y <*> abst x i t
   abst x i (TE e)    = TE <$> abst x i e
 
 instance Stan b => Stan (Bind b) where

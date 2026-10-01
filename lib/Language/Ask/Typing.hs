@@ -44,6 +44,7 @@ hnf :: Tm -> AM Tm
 hnf t = case t of
   TC _ _ -> return t
   TB _ -> return t
+  TQ y t -> hnf t
   TE e -> upsilon <$> hnfSyn e
 
 upsilon :: Syn -> Tm
@@ -318,13 +319,14 @@ elabEq lhs rhs = do
         return $ TC "=" [ty, lhs, rhs]
 
 elabTm :: ConMode -> Tm -> Appl -> AM Tm
+-- elabTm m ty ([(T (LB (_, _, "[") _ _), _ , _)], a) | trace (show ty ++ " on " ++ show a) False = undefined
 elabTm m ty (_, a) | track (show ty ++ " on " ++ show a) False = undefined
 elabTm m ty (ls, (Sym, _, "=") :$$ [lhs, rhs]) = do
   unify Type ty Prop
   elabEq lhs rhs
 elabTm m ty (ls, l@(_, _, y) :$$ ras) = do
   ga <- gamma
-  case l of
+  t <- case l of
     _ | synthy ga l -> do
       (e, sy) <- elabSyn m y ras
       cope (subtype sy ty) (\ _ -> do
@@ -342,7 +344,10 @@ elabTm m ty (ls, l@(_, _, y) :$$ ras) = do
       tel <- constructor m ty y
       fst <$> elabVec m y tel ras
     _ -> gripe FAIL
- where
+  case ls of
+    [(T (LB (_, _, "[") _ _), _ , _)]
+      -> return $ TQ ty t
+    _ -> return t
 
 
 shitSort :: [((String, Tm), Appl)] -> AM [((String, Tm), Appl)]
@@ -358,6 +363,21 @@ shitSort (a@((_, _), (_, (_, _, "::") :$$ _)) : as) = (a :) <$> shitSort as
 shitSort (a : as) = topInsert a <$> shitSort as
 
 elabVec :: ConMode -> String -> Tel -> [Appl] -> AM (Tm, Matching)
+  -- making = polyary
+elabVec cm "=" tel as = do
+  ty <- TE <$> hole Type
+  (ss, sch) <- qargs ty 0 as
+  sch <- shitSort sch
+  m <- argChk cm [] sch
+  return (stan m $ TC "=" (ty : ss), m)
+ where
+  qargs :: Tm -> Int -> [Appl] -> AM ([Tm], [((String, Tm), Appl)])
+  qargs ty i [] = return ([], [])
+  qargs ty i (a : as) = do
+    (ts, sch) <- qargs ty (i + 1) as
+    return (TM x [] : ts, topInsert ((x, ty), a) sch)
+   where
+    x = if i == 0 then "x" else if null as then "y" else "v" ++ show i
 elabVec cm con tel as = do
   (ss, sch, pos) <- cope (specialise tel as)
     (\ _ -> gripe (WrongNumOfArgs con (ari tel) as))
@@ -490,6 +510,9 @@ unify' heh ty a b = do  -- pay more attention to types
     (TC f as, TC g bs) -> do
       guardErr (f == g) (Unification f g)
       tel <- constructor EXP ty f
+      (as, bs) <- return $ case (f, as, bs) of
+        ("=", at : a : _, bt : b : _) -> ([at, a, last as], [bt, b, last bs])
+        _ -> (as, bs)
       unifies' heh tel as bs
     (TE (TP xp), t) -> make xp t ty
     (s, TE (TP yp)) -> make yp s ty
@@ -621,6 +644,7 @@ instance PDep Tm where
   pDep x t = case t of
       TC _ ts -> pDep x ts
       TB t -> pDep x t
+      TQ y t -> pDep x y || pDep x t
       TE e -> pDep x e
 
 instance PDep Syn where
