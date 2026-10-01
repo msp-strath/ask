@@ -46,7 +46,7 @@ data Status
 passive :: Make () Appl -> Make Anno TmR
 passive (Make k g m () ps src) =
   Make k (Your g) (fmap Your m) (Keep, False) (fmap subPassive ps) src
-  
+
 subPassive :: SubMake () Appl -> SubMake Anno TmR
 subPassive ((srg, (ds, gs)) ::- p) = (srg, (ds, map (fmap Your) gs)) ::- passive p
 subPassive (SubPGuff ls) = SubPGuff ls
@@ -54,7 +54,7 @@ subPassive (SubPGuff ls) = SubPGuff ls
 surplus :: Make () Appl -> Make Anno TmR
 surplus (Make k g m () ps src) =
   Make k (Your g) (fmap Your m) (Junk Surplus, True) (fmap subPassive ps) src
-  
+
 subSurplus :: SubMake () Appl -> SubMake Anno TmR
 subSurplus ((srg, (ds, gs)) ::- p) = (srg, (ds, map (fmap Your) gs)) ::- surplus p
 subSurplus (SubPGuff ls) = SubPGuff ls
@@ -130,7 +130,7 @@ chkProg p gr mr ps src@(h,b) = do
         Bind (yn, Hide ty) k -> do
           let yp = (yn, Hide (rfold e4p sb ty))
           return (ga :< Bind yp k, (yn, TP yp) : sb)
-        z -> return (ga :< z, sb) 
+        z -> return (ga :< z, sb)
     bungle ga sch xz y (Pr hs) = do
       zs <- for sch $ \ ((x, s), _) -> do
         xn <- fresh (y ++ x)
@@ -303,7 +303,7 @@ chkSubProofs ps = do
           True <- tracy "NOPE" $ return True
           gripe gr)
         return
-      True <- tracy "YEP" $ return True        
+      True <- tracy "YEP" $ return True
       return ()
     go _ _ = gripe FAIL
     ensure (Given h) = mayhem (my h) >>= given
@@ -369,7 +369,7 @@ chkSubProofs ps = do
     =   given s
     <|> given FALSE
     <|> True <$ equal Prop (s, TRUE)
-            
+
   need (PROVE g) = return $
     ([], ([], [])) ::- Make Prf (My g) (Stub True) (Need, False)
       ([] :-/ Stop) ([], [])
@@ -445,7 +445,7 @@ validSubProof sgs sps = do
     return (ga :< z, ds, us)
   jank ga = return (ga, [], [])
   splott us ds ((ls, (vs, hs)) ::- Make mk g me a sps src) =
-    ((ls, (vs ++ us, [Given (rfold e4p ds h) | Given h <- hs])) ::- 
+    ((ls, (vs ++ us, [Given (rfold e4p ds h) | Given h <- hs])) ::-
      Make mk (rfold e4p ds g) me a sps src)
   splott _ _ s = s
 
@@ -553,7 +553,7 @@ pout k p@(Make mk g m (s, n) ps (h, b)) = let k' = scavenge b in case s of
    (x : ls) `tense` n = (x : ls)
    (l : ls) `prove` n = l : (ls `prove` n)
    [] `prove` n = [] -- should never happen
-   
+
    psout :: LayKind -> Bloc (SubMake Anno t) -> AM (Bloc String)
    psout k (g :-/ Stop) = return $ g :-/ Stop
    psout k (g :-/ SubPGuff [] :-\ h :-/ r) = psout k ((g ++ h) :-/ r)
@@ -586,7 +586,7 @@ pout k p@(Make mk g m (s, n) ps (h, b)) = let k' = scavenge b in case s of
      givs :: [Given t] -> AM (String -> String)
      givs gs = traverse wallop gs >>= \case
        [] -> return id
-       g : gs -> return $ 
+       g : gs -> return $
          ("given " ++) . (g ++) . rfold comma gs (" " ++)
        where
          wallop :: Given t -> AM String
@@ -834,7 +834,7 @@ chkParse (Make Pse (ParseProb c sm) m () ss (ls, rs)) = do
       subs (NonTerminal c : gs) (ns :-/ Stop) = do
         (_, xs) <- subs gs (ns :-/ Stop)
         pure $
-          (Nothing, 
+          (Nothing,
            ns :-/ (mempty ::- Make Pse (ParseProb c Nothing) (Stub True) (Need, False)
                   ([] :-/ Stop) ([], []))
            :-\ xs)
@@ -876,7 +876,7 @@ askRawDecl :: (RawDecl, [LexL]) -> AM String
 askRawDecl (RawProof (Make Prf gr mr () ps src), ls) = id <$
   doorStop <*>
   cope (do
-      g <- impQElabTm Prop gr 
+      g <- impQElabTm Prop gr
       gt <- mayhem $ my g
       de <- doorStep
       let claim = discharge de gt
@@ -907,7 +907,7 @@ askRawDecl (RawProof (Make Def gr@(_, (_, _, f) :$$ as) mr () ps src), ls) = do
       p <- proglify fn (f, sch)
       p <- dubStep p f as
       True <- tracy (show p) $ return True
-      ((True,) . bifoldMap id (($ "") . rfold lout)) <$> 
+      ((True,) . bifoldMap id (($ "") . rfold lout)) <$>
         (chkProg p gr mr ps src >>= pout (Denty 1))
       )
      (\ gr -> do
