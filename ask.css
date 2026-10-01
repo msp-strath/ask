@@ -2,16 +2,16 @@
   background: #eee;
 }
 .ask-primary-keyword {
-  background-color: orange;
+  background-color: rgba(255, 165, 00, 0.5);
 }
 .ask-assumption {
-  background-color: orchid;
+  background-color: rgba(218, 112, 214, 0.5);
 }
 .ask-secondary-keyword {
   font-weight: bold;
 }
 .ask-response-success {
-  background-color: palegreen;
+  background-color: rgba(152, 251, 152, 0.5);
 }
 .ask-commented {
   color: light-dark(firebrick, gray);
@@ -24,7 +24,7 @@
   font-style: italic;
 }
 .ask-focus {
-  background-color: lemonchiffon;
+  background-color: rgba(255, 250, 205, 0.5);
 }
 .ask-parens {
   font-weight: bold;

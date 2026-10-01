@@ -1007,6 +1007,7 @@ redeyes :: AskState -> [String]
 redeyes = nub . foldMap redy . context where
   redy (Data _ cons) = foldMap redy cons
   redy ((ty, _) ::> (con, _)) | not (isKind ty) = [con]
+  redy (ByRule _ ((_, (nm, _)) :<= _)) = [nm]
   redy _ = []
 
 greeneyes :: AskState -> [String]
