@@ -994,8 +994,22 @@ filthier as s = case runAM go () as of
     setFixities fo
     bifoldMap (($ "") . rfold lout) id <$> traverse askRawDecl b
 
+isKind :: Con -> Bool
+isKind ty = ty `elem` ["Prop", "Type"]
+
 blueyes :: AskState -> [String]
-blueyes = foldMap bluey . context where
+blueyes = nub . foldMap bluey . context where
   bluey (Data con _) = [con]
+  bluey ((ty, []) ::> (con, _)) | isKind ty = [con]
   bluey _ = []
 
+redeyes :: AskState -> [String]
+redeyes = nub . foldMap redy . context where
+  redy (Data _ cons) = foldMap redy cons
+  redy ((ty, _) ::> (con, _)) | not (isKind ty) = [con]
+  redy _ = []
+
+greeneyes :: AskState -> [String]
+greeneyes = nub . foldMap greeny . context where
+  greeny (Declare f _ _) = [f]
+  greeny _ = []
