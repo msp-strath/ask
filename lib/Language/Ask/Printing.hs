@@ -37,11 +37,11 @@ pinx i = return $ "???"
 pnom :: Nom -> AM String
 pnom x = cope (nomBKind x)
  (\ gr -> if null x then return "boo" else case last x of
-     (x, i) -> return $ x ++ show i)
+     (xr, i) -> return $ render xr x)
  $ \case
    User x -> return x
    _      -> if null x then return "boo" else case last x of
-     (x, i) -> return $ x ++ show i
+     (xr, i) -> return $ render xr x
 
 pppa :: Spot -> Wot -> String -> String
 pppa x y s = if paren x y then "(" ++ s ++ ")" else s where

@@ -77,6 +77,11 @@ next (NSuffix k) = 1 + k
 
 type Nom = [(String, Suffix)]   -- names for parameters are chosen by the system
 
+render :: String -> Nom -> String
+render x xn = x ++ case snd (last xn) of -- BOO!
+  Prime -> "'"
+  NSuffix k -> show k
+
 
 ------------------------------------------------------------------------------
 --  Subterm Checking
