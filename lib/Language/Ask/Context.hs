@@ -21,7 +21,7 @@ import Control.Arrow ((***))
 
 import Data.Map (Map)
 import qualified Data.Map as Map
-import Data.Maybe (fromMaybe)
+import Data.Maybe (maybe)
 
 import Language.Ask.Bwd
 import Language.Ask.Hide
@@ -118,7 +118,7 @@ data Gripe
 --  Mutable AskState -- and Read-Only Setup
 ------------------------------------------------------------------------------
 
-type Root = (Bwd (String, Int), Map String Int)
+type Root = (Bwd (String, Suffix), Map String Int)
 
 data AskState = AskState
   { context  :: Context
@@ -200,8 +200,8 @@ setGamma ga = AM $ \ setup as -> Right ((), as {context = ga})
 fresh :: String -> AM Nom
 fresh x = AM $ \ setup as -> case root as of
   (roo, non) ->
-    let k = fromMaybe 0 $ Map.lookup x non in
-    Right (roo <>> [(x, k)], as {root = (roo, Map.insert x k non)})
+    let suff = maybe Prime NSuffix $ Map.lookup x non in
+    Right (roo <>> [(x, suff)], as {root = (roo, Map.insert x (next suff) non)})
 
 
 ------------------------------------------------------------------------------
