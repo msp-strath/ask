@@ -19,13 +19,17 @@ import qualified Data.Map as M
 import Control.Applicative
 import Control.Arrow ((***))
 
+import Data.Map (Map)
+import qualified Data.Map as Map
+import Data.Maybe (fromMaybe)
+
 import Language.Ask.Bwd
 import Language.Ask.Hide
 import Language.Ask.Tm
 import Language.Ask.Lexing
 import Language.Ask.RawAsk
 
-import Debug.Trace
+-- import Debug.Trace
 
 ------------------------------------------------------------------------------
 --  Contexts
@@ -114,7 +118,7 @@ data Gripe
 --  Mutable AskState -- and Read-Only Setup
 ------------------------------------------------------------------------------
 
-type Root = (Bwd (String, Int), Int)
+type Root = (Bwd (String, Int), Map String Int)
 
 data AskState = AskState
   { context  :: Context
@@ -195,7 +199,9 @@ setGamma ga = AM $ \ setup as -> Right ((), as {context = ga})
 
 fresh :: String -> AM Nom
 fresh x = AM $ \ setup as -> case root as of
-  (roo, non) -> Right (roo <>> [(x, non)], as {root = (roo, non + 1)})
+  (roo, non) ->
+    let k = fromMaybe 0 $ Map.lookup x non in
+    Right (roo <>> [(x, k)], as {root = (roo, Map.insert x k non)})
 
 
 ------------------------------------------------------------------------------
