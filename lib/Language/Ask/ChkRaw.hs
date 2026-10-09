@@ -2,14 +2,16 @@
 
 module Language.Ask.ChkRaw where
 
-import Data.List hiding ((\\))
-import Data.Char
-import Control.Arrow ((***))
-import Data.Bifoldable
 import Control.Applicative
-import Data.Traversable
+import Control.Arrow ((***))
 import Control.Monad
+
+import Data.Bifoldable
+import Data.Char
 import Data.Foldable
+import Data.List hiding ((\\))
+import qualified Data.Map as Map
+import Data.Traversable
 
 import Debug.Trace
 
@@ -978,7 +980,7 @@ ordure s = case runAM go () initAskState of
 initAskState :: AskState
 initAskState = AskState
   { context  = myContext
-  , root     = (B0, 0)
+  , root     = (B0, Map.empty)
   , fixities = myFixities
   }
 

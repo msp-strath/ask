@@ -66,8 +66,21 @@ pattern Sized t z i = TC "$" [t, z, i]
 pattern Weer i = TC "S" [i]
 pattern Big    = TC "Z" []
 
+data Suffix
+  = Prime
+  | NSuffix Int
+  deriving (Show, Eq)
 
-type Nom = [(String, Int)]   -- names for parameters are chosen by the system
+next :: Suffix -> Int
+next Prime = 0
+next (NSuffix k) = 1 + k
+
+type Nom = [(String, Suffix)]   -- names for parameters are chosen by the system
+
+render :: String -> Nom -> String
+render x xn = x ++ case snd (last xn) of -- BOO!
+  Prime -> "'"
+  NSuffix k -> show k
 
 
 ------------------------------------------------------------------------------
@@ -97,7 +110,7 @@ instance SubTm t => SubTm (Bind t) where
   subTm s (K b) = subTm s b
   subTm s (L b) = subTm (s <^> o' mempty) b
 
-  
+
 
 
 ------------------------------------------------------------------------------
