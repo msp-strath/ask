@@ -361,14 +361,14 @@ chkSubProofs ps = do
       (us, b') <- extra us
       return (us, b && b')
   obvious s@(TC "=" [ty, lhs, rhs])
-    =   given s
-    <|> given (TC "=" [ty, rhs, lhs])
-    <|> True <$ equal ty (lhs, rhs)
-    <|> given FALSE
+    =   True <$ equal ty (lhs, rhs)
+    <||> given FALSE
+    <||> given s
+    <||> given (TC "=" [ty, rhs, lhs])
   obvious s
-    =   given s
-    <|> given FALSE
-    <|> True <$ equal Prop (s, TRUE)
+    =   True <$ equal Prop (s, TRUE)
+    <||> given s
+    <||> given FALSE
 
   need (PROVE g) = return $
     ([], ([], [])) ::- Make Prf (My g) (Stub True) (Need, False)

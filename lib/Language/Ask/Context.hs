@@ -169,6 +169,13 @@ cope (AM f) yuk wow = AM $ \ setup as -> case f setup as of
   Left g        -> runAM (yuk g) setup as
   Right (x, as) -> runAM (wow x) setup as
 
+infixl 3 <||>
+-- we'd like the Bool to be True
+(<||>) :: AM Bool -> AM Bool -> AM Bool
+ma <||> mb = cope ma (const mb) $ \ a ->
+  if a then return True
+       else cope mb (const (return False)) return
+
 getFixities :: AM FixityTable
 getFixities = AM $ \ _ s -> Right (fixities s, s)
 

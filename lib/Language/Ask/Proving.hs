@@ -178,7 +178,10 @@ given goal = do
   go B0 = gripe $ NotGiven goal
   go (ga :< Hyp b hyp) = do
     test <- isItThisProp goal hyp
-    if test then return b else go ga
+    if test
+      then (if b then return True
+                 else cope (go ga) (\ _ -> return False) return)
+      else go ga
   go (ga :< _) = go ga
 
 
