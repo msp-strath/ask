@@ -73,13 +73,13 @@ prayTel m (Pr hs) = do
   return m
 prayTel m (Ex s b) = do
   xn <- fresh "x"
-  let u = "x" ++ show (snd (last xn)) -- BOO!
+  let u = render "x" xn
   let xp = (xn, Hide (stan m s))
   push $ Bind xp (User u)
   prayTel m (b // TP xp)
 prayTel m ((x, s) :*: t) = do
   xn <- fresh x
-  let u = x ++ show (snd (last xn)) -- BOO!
+  let u = render x xn
   let xp = (xn, Hide (stan m s))
   push $ Bind xp (User u)
   prayTel ((x, TE (TP xp)) : m) t
@@ -92,7 +92,7 @@ prayPat m ty (PC c ps) = do
   return (TC c ts ::: ty, m)
 prayPat m ty (PM x _) = do
   xn <- fresh x
-  let u = "x" ++ show (snd (last xn)) -- BOO!
+  let u = render x xn
   let xp = (xn, Hide (stan m ty))
   push $ Bind xp (User u)
   return (TP xp, (x, TE (TP xp)) : m)
